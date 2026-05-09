@@ -112,19 +112,15 @@ export const Sidebar = ({
         {sessions.length > 0 && <div className="h-px bg-white/5 my-4 mx-2" />}
 
         <div className="space-y-0.5">
-          {[
-            { icon: Layout, label: "Split View" },
-            { icon: Terminal, label: "Console" },
-            { icon: Settings, label: "Config" },
-          ].map((item, idx) => (
-            <button
-              key={idx}
-              className="w-full flex items-center gap-3 p-2.5 rounded-lg text-neutral-500 hover:text-neutral-300 hover:bg-white/[0.02] transition-all"
-            >
-              <item.icon size={16} />
-              {!isCollapsed && <span className="text-xs font-medium">{item.label}</span>}
-            </button>
-          ))}
+          <button className="w-full flex items-center gap-3 p-2.5 rounded-lg text-neutral-500 hover:text-neutral-300 hover:bg-white/[0.02] transition-all">
+            <Terminal size={16} />
+            {!isCollapsed && <span className="text-xs font-medium">Console</span>}
+          </button>
+
+          <button className="w-full flex items-center gap-3 p-2.5 rounded-lg text-neutral-500 hover:text-neutral-300 hover:bg-white/[0.02] transition-all">
+            <Settings size={16} />
+            {!isCollapsed && <span className="text-xs font-medium">Config</span>}
+          </button>
         </div>
       </div>
 

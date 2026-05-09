@@ -18,8 +18,6 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [searchValue, setSearchValue] = useState("");
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
-  const [isSplitMode, setIsSplitMode] = useState(false);
-  const [secondarySessionId, setSecondarySessionId] = useState<string | null>(null);
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
 
@@ -59,23 +57,6 @@ function App() {
     }
   }, [activeSessionId, activeSession?.url]);
 
-  const handleToggleSplit = () => {
-    if (!isSplitMode) {
-      const secondaryId = Math.random().toString(36).substring(7);
-      const newSession: Session = {
-        id: secondaryId,
-        title: "Split Tab",
-        url: ""
-      };
-      setSessions(prev => [...prev, newSession]);
-      setSecondarySessionId(secondaryId);
-      setIsSplitMode(true);
-    } else {
-      setIsSplitMode(false);
-      setSecondarySessionId(null);
-    }
-  };
-
   const handleNavigate = (url: string) => {
     if (!activeSessionId) {
       // If no active session, create one
@@ -105,18 +86,12 @@ function App() {
       if (activeSessionId === id) {
         setActiveSessionId(filtered.length > 0 ? filtered[filtered.length - 1].id : null);
       }
-      if (secondarySessionId === id) {
-        setSecondarySessionId(null);
-        setIsSplitMode(false);
-      }
       return filtered;
     });
   };
 
   const handleGoHome = () => {
     setActiveSessionId(null);
-    setIsSplitMode(false);
-    setSecondarySessionId(null);
     setSearchValue("");
   };
 
@@ -148,7 +123,7 @@ function App() {
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 1.02 }}
-                className="absolute inset-0 flex items-center justify-center p-8 z-10 bg-[#050505]"
+                className="absolute inset-0 flex items-center justify-center p-8 z-20 bg-[#050505]"
               >
                 <div className="text-center space-y-6 max-w-md">
                   <div className="w-20 h-20 bg-accent/10 border border-accent/20 rounded-2xl flex items-center justify-center mx-auto shadow-2xl shadow-accent/5">
@@ -182,4 +157,28 @@ function App() {
                   </div>
                 </div>
               </motion.div>
-            
+            ) : null}
+          </AnimatePresence>
+
+          {/* The centralized WebviewManager handles all native instances */}
+          <Viewport 
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            isPaletteOpen={isPaletteOpen}
+          />
+          
+          <div className="absolute right-0 top-0 bottom-0 w-[1px] bg-border/50 pointer-events-none" />
+        </main>
+      </div>
+
+      <StatusBar />
+      <CommandPalette 
+        isOpen={isPaletteOpen} 
+        onClose={() => setIsPaletteOpen(false)} 
+        onNavigate={handleNavigate} 
+      />
+    </div>
+  );
+}
+
+export default App;
