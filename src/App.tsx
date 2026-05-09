@@ -4,6 +4,7 @@ import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { CommandPalette } from "./components/CommandPalette";
 import { Viewport } from "./components/Viewport";
+import { Home } from "./components/Home";
 import { motion, AnimatePresence } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 
@@ -118,45 +119,7 @@ function App() {
         <main className="flex-1 relative overflow-hidden bg-[#050505]">
           <AnimatePresence mode="wait">
             {(!activeSessionId || (activeSession && activeSession.url === "")) ? (
-              <motion.div 
-                key="home"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.02 }}
-                className="absolute inset-0 flex items-center justify-center p-8 z-20 bg-[#050505]"
-              >
-                <div className="text-center space-y-6 max-w-md">
-                  <div className="w-20 h-20 bg-accent/10 border border-accent/20 rounded-2xl flex items-center justify-center mx-auto shadow-2xl shadow-accent/5">
-                    <div className="w-10 h-10 bg-accent rounded-lg flex items-center justify-center text-white font-bold text-xl">
-                      D
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <h1 className="text-2xl font-bold tracking-tight">Ready for Exploration</h1>
-                    <p className="text-neutral-500 text-sm leading-relaxed">
-                      Create a new session or search to start browsing.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 pt-4">
-                    <div 
-                      onClick={() => handleNavigate("https://wikipedia.org")}
-                      className="p-4 rounded-xl bg-neutral-900/50 border border-border text-left hover:border-accent/30 transition-colors cursor-pointer group"
-                    >
-                      <div className="text-[10px] font-bold text-accent mb-1 uppercase tracking-widest">Documentation</div>
-                      <div className="text-sm font-medium text-neutral-300 group-hover:text-white">Wikipedia</div>
-                    </div>
-                    <div 
-                      onClick={() => handleNavigate("https://youtube.com")}
-                      className="p-4 rounded-xl bg-neutral-900/50 border border-border text-left hover:border-accent/30 transition-colors cursor-pointer group"
-                    >
-                      <div className="text-[10px] font-bold text-emerald-500 mb-1 uppercase tracking-widest">Multimedia</div>
-                      <div className="text-sm font-medium text-neutral-300 group-hover:text-white">YouTube</div>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
+              <Home onNavigate={handleNavigate} />
             ) : null}
           </AnimatePresence>
 

@@ -74,7 +74,7 @@ export const TitleBar = ({ onNavigate, searchValue, onSearchChange, activeSessio
       <div className="flex items-center gap-3 w-1/4 pointer-events-none">
         <div className="w-2.5 h-2.5 bg-accent rounded-full shadow-[0_0_10px_rgba(var(--accent-rgb),0.5)]" />
         <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-neutral-500">
-          DEVLOOK <span className="text-neutral-700 font-normal">v0.1.0</span>
+          RCBROWSING <span className="text-neutral-700 font-normal">v0.1.0</span>
         </span>
       </div>
 

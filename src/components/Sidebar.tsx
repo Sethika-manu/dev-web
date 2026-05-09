@@ -119,7 +119,7 @@ export const Sidebar = ({
 
           <button className="w-full flex items-center gap-3 p-2.5 rounded-lg text-neutral-500 hover:text-neutral-300 hover:bg-white/[0.02] transition-all">
             <Settings size={16} />
-            {!isCollapsed && <span className="text-xs font-medium">Config</span>}
+            {!isCollapsed && <span className="text-xs font-medium">Settings</span>}
           </button>
         </div>
       </div>
