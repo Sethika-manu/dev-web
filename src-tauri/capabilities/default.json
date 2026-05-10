@@ -1,5 +1,5 @@
 {
-  "$schema": "../gen/schemas/capability.json",
+  "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default permissions for the browser",
   "windows": ["*"],
