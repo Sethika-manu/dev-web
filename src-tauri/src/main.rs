@@ -170,6 +170,16 @@ fn main() {
   sys.refresh_all();
   
   tauri::Builder::default()
+    .setup(|app| {
+        #[cfg(target_os = "windows")]
+        {
+            let main_window = app.get_webview_window("main").unwrap();
+            if let Some(icon) = app.default_window_icon() {
+                main_window.set_icon(icon.clone()).unwrap();
+            }
+        }
+        Ok(())
+    })
     .manage(SystemState(Mutex::new(sys)))
     .invoke_handler(tauri::generate_handler![
         open_webview, 
