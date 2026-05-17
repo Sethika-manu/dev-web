@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { X, Minus, Square, Copy, Search, ArrowLeft, ArrowRight } from "lucide-react";
+import { X, Minus, Square, Copy, Search, ArrowLeft, ArrowRight, RotateCw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 
 const appWindow = getCurrentWindow();
@@ -66,6 +66,12 @@ export const TitleBar = ({ onNavigate, searchValue, onSearchChange, activeSessio
     }
   };
 
+  const handleReload = () => {
+    if (activeSessionId) {
+      invoke("reload_webview", { label: activeSessionId }).catch(() => {});
+    }
+  };
+
   const handleMouseDownDrag = (e: React.MouseEvent) => {
     if (e.button === 0) {
       const target = e.target as HTMLElement;
@@ -106,6 +112,14 @@ export const TitleBar = ({ onNavigate, searchValue, onSearchChange, activeSessio
               title="Go Forward"
             >
               <ArrowRight size={16} />
+            </button>
+            <button
+              onClick={handleReload}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="p-1.5 hover:bg-white/5 text-neutral-500 hover:text-white transition-colors rounded-md ml-0.5"
+              title="Reload"
+            >
+              <RotateCw size={14} />
             </button>
           </div>
         )}

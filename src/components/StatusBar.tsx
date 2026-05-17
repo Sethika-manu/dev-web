@@ -31,26 +31,26 @@ export const StatusBar = () => {
   }, []);
 
   return (
-    <div className="h-6 bg-background border-t border-border flex items-center justify-between px-3 select-none">
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-1.5 group cursor-help">
-          <Cpu size={12} className="text-accent" />
-          <span className="text-[10px] font-mono text-neutral-400">CPU: <span className="text-neutral-200">{metrics.cpu.toFixed(1)}%</span></span>
+    <div className="h-8 bg-background border-t border-border flex items-center justify-between px-4 select-none">
+      <div className="flex items-center gap-6">
+        <div className="flex items-center gap-2 group cursor-help">
+          <Cpu size={16} className="text-accent" />
+          <span className="text-sm font-mono text-neutral-400">CPU: <span className="text-neutral-200">{metrics.cpu.toFixed(1)}%</span></span>
         </div>
-        <div className="flex items-center gap-1.5 group cursor-help">
-          <MemoryStick size={12} className="text-emerald-500" />
-          <span className="text-[10px] font-mono text-neutral-400">RAM: <span className="text-neutral-200">{metrics.ram}MB</span></span>
+        <div className="flex items-center gap-2 group cursor-help">
+          <MemoryStick size={16} className="text-emerald-500" />
+          <span className="text-sm font-mono text-neutral-400">RAM: <span className="text-neutral-200">{metrics.ram}MB</span></span>
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-1.5">
-          <Wifi size={12} className="text-neutral-500" />
-          <span className="text-[10px] font-mono text-neutral-400">ping: <span className="text-neutral-200">{metrics.ping}ms</span></span>
+      <div className="flex items-center gap-6">
+        <div className="flex items-center gap-2">
+          <Wifi size={16} className="text-neutral-500" />
+          <span className="text-sm font-mono text-neutral-400">ping: <span className="text-neutral-200">{metrics.ping}ms</span></span>
         </div>
-        <div className="flex items-center gap-1.5 bg-accent/10 px-2 py-0.5 rounded border border-accent/20">
-          <Zap size={10} className="text-accent fill-accent" />
-          <span className="text-[10px] font-bold text-accent tracking-tighter">OPTIMIZED</span>
+        <div className="flex items-center gap-2 bg-accent/10 px-3 py-1 rounded border border-accent/20">
+          <Zap size={14} className="text-accent fill-accent" />
+          <span className="text-xs font-bold text-accent tracking-tighter">OPTIMIZED</span>
         </div>
       </div>
     </div>

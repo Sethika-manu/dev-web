@@ -17,7 +17,7 @@ export const Viewport = ({
   sessions: Session[], 
   activeSessionId: string | null,
   isPaletteOpen: boolean,
-  appView: 'browser' | 'settings' | 'console'
+  appView: 'browser' | 'settings' | 'console' | 'downloads'
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedWebviews = useRef<Set<string>>(new Set());
@@ -82,16 +82,23 @@ export const Viewport = ({
   // 2. Absolute Failsafe Bounds Sync with ResizeObserver
   useEffect(() => {
     let frameId: number;
+    let isSyncing = false;
 
     const syncBounds = async () => {
+      if (isSyncing) return;
+      isSyncing = true;
+      
       try {
-        if (!containerRef.current) return;
+        if (!containerRef.current) {
+          isSyncing = false;
+          return;
+        }
         
         // Use getBoundingClientRect for absolute window coordinates
         const rect = containerRef.current.getBoundingClientRect();
 
-        // IF APP IS IN SETTINGS/CONSOLE: Move webviews off-screen immediately
-        if (appView === 'settings' || appView === 'console') {
+        // IF APP IS IN SETTINGS/CONSOLE/DOWNLOADS: Move webviews off-screen immediately
+        if (appView === 'settings' || appView === 'console' || appView === 'downloads') {
           for (const label of initializedWebviews.current) {
             await invoke("set_webview_bounds", { 
               label, 
@@ -101,6 +108,7 @@ export const Viewport = ({
               height: 100 
             }).catch((e) => console.warn("Hide Error:", e));
           }
+          isSyncing = false;
           return;
         }
 
@@ -111,10 +119,12 @@ export const Viewport = ({
           if (isCurrentlyActive) {
             // FAILSAFE: If dimensions are 0, retry in next frame to handle React transitions
             if (rect.width === 0 || rect.height === 0) {
+              isSyncing = false;
               frameId = requestAnimationFrame(syncBounds);
               return;
             }
 
+            // Await is REQUIRED here to prevent flooding the Tauri IPC channel (which causes black screens/crashes)
             await invoke("set_webview_bounds", {
               label: session.id,
               x: rect.x,
@@ -136,6 +146,8 @@ export const Viewport = ({
       } catch (err) {
         console.error("Critical Native Sync Error:", err);
       }
+      
+      isSyncing = false;
     };
 
     const observer = new ResizeObserver((entries) => {

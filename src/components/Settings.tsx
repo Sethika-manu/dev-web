@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Monitor, 
   Shield, 
@@ -115,6 +115,16 @@ export const Settings = () => {
 
 
 
+  const [restoreTabs, setRestoreTabs] = useState(() => {
+    return localStorage.getItem('rc_restore_tabs') === 'true';
+  });
+
+  const toggleRestoreTabs = () => {
+    const newVal = !restoreTabs;
+    setRestoreTabs(newVal);
+    localStorage.setItem('rc_restore_tabs', String(newVal));
+  };
+
   const sections: SettingSection[] = [
     {
       title: "General",
@@ -139,6 +149,14 @@ export const Settings = () => {
           description: t.language_desc, 
           value: language,
           onClick: cycleLanguage
+        },
+        {
+          icon: <Info size={18} />,
+          label: "Restore previous tabs",
+          description: "Re-open tabs from your last session",
+          toggle: true,
+          checked: restoreTabs,
+          onClick: toggleRestoreTabs
         }
       ]
     },

@@ -11,7 +11,8 @@ import {
   ChevronRight,
   Plus,
   Search,
-  X
+  X,
+  Download
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -27,7 +28,7 @@ interface Session {
 interface SidebarProps {
   sessions: Session[];
   activeSessionId: string | null;
-  activeView: 'browser' | 'settings' | 'console';
+  activeView: 'browser' | 'settings' | 'console' | 'downloads';
   onSessionSelect: (id: string) => void;
   onSessionClose: (id: string) => void;
   onNewSession: () => void;
@@ -35,6 +36,8 @@ interface SidebarProps {
   onSearchClick: () => void;
   onSettingsClick: () => void;
   onConsoleClick: () => void;
+  onDownloadsClick: () => void;
+  isDownloading: boolean;
 }
 
 export const Sidebar = ({ 
@@ -47,7 +50,9 @@ export const Sidebar = ({
   onHomeClick,
   onSearchClick,
   onSettingsClick,
-  onConsoleClick
+  onConsoleClick,
+  onDownloadsClick,
+  isDownloading
 }: SidebarProps) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { t } = useSettings();
@@ -61,10 +66,14 @@ export const Sidebar = ({
     }
   };
 
+  const toggleCollapse = () => {
+    setIsCollapsed(!isCollapsed);
+  };
+
   return (
-    <motion.div
-      animate={{ width: isCollapsed ? 64 : 240 }}
-      className="h-full bg-white dark:bg-[#0a0a0a] border-r border-neutral-200 dark:border-white/5 flex flex-col relative z-20 transition-colors duration-300"
+    <div
+      style={{ width: isCollapsed ? 64 : 240 }}
+      className="h-full bg-white dark:bg-[#0a0a0a] border-r border-neutral-200 dark:border-white/5 flex flex-col relative z-20 flex-shrink-0"
     >
       <div 
         data-tauri-drag-region
@@ -81,7 +90,7 @@ export const Sidebar = ({
           </span>
         )}
         <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
+          onClick={toggleCollapse}
           className="p-1.5 hover:bg-neutral-100 dark:hover:bg-white/5 rounded-md transition-colors text-neutral-400 dark:text-neutral-500"
         >
           {isCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
@@ -139,6 +148,24 @@ export const Sidebar = ({
 
         <div className="space-y-0.5">
           <button 
+            onClick={onDownloadsClick}
+            className={cn(
+              "w-full flex items-center gap-3 p-2.5 rounded-lg transition-all",
+              activeView === 'downloads'
+                ? "bg-neutral-100 dark:bg-white/5 text-neutral-900 dark:text-white shadow-sm"
+                : "text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-white/[0.02]"
+            )}
+          >
+            <motion.div
+              animate={{ y: isDownloading ? [0, -3, 0] : 0 }}
+              transition={{ repeat: isDownloading ? Infinity : 0, duration: 0.6 }}
+            >
+              <Download size={16} className={cn(isDownloading && "text-accent")} />
+            </motion.div>
+            {!isCollapsed && <span className="text-xs font-medium">Downloads</span>}
+          </button>
+
+          <button 
             onClick={onConsoleClick}
             className={cn(
               "w-full flex items-center gap-3 p-2.5 rounded-lg transition-all",
@@ -175,6 +202,6 @@ export const Sidebar = ({
           {!isCollapsed && <span className="text-xs font-medium">Cmd + K</span>}
         </button>
       </div>
-    </motion.div>
+    </div>
   );
 };
