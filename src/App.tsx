@@ -90,7 +90,7 @@ export default function App() {
             await update.downloadAndInstall();
             await relaunch();
           } else {
-            // NATIVE DIALOG: Always shows on top of Native Webviews
+            // NATIVE DIALOG: Always shows on top of Native Webviews doned
             const wantsUpdate = await ask(
               `A new version v${update.version} is ready to install.\n\nUpdate now to get the latest features and security patches.`,
               {
