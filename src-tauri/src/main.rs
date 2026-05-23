@@ -5,7 +5,8 @@ use serde::Serialize;
 use std::sync::Mutex;
 use sysinfo::System;
 use tauri::webview::{DownloadEvent, PageLoadEvent, WebviewBuilder};
-use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, Runtime};
+// NEW: Theme enum එක import කරා OS level එකෙන් Theme එක force කරන්න
+use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, Runtime, Theme};
 
 struct SystemState(Mutex<System>);
 
@@ -25,11 +26,20 @@ async fn open_webview<R: Runtime>(
     y: f64,
     width: f64,
     height: f64,
+    theme: String,
 ) -> Result<(), String> {
-    // Close existing if any with same label (rare but safe)
     if let Some(existing) = window.get_webview(&label) {
         let _ = existing.close();
     }
+
+    // 1. NATIVE THEME ENFORCEMENT ON STARTUP
+    // මේකෙන් තමයි මුළු Webview එකටම prefers-color-scheme එක Native විදියට යවන්නේ
+    let tauri_theme = if theme == "dark" {
+        Some(Theme::Dark)
+    } else {
+        Some(Theme::Light)
+    };
+    let _ = window.set_theme(tauri_theme);
 
     let url_parsed = tauri::Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
 
@@ -40,6 +50,7 @@ async fn open_webview<R: Runtime>(
         .unwrap_or_else(|_| std::path::PathBuf::from("cache"));
     app_cache_dir.push("webview_data");
 
+    // JS Fallback for stubborn sites like YouTube
     let init_script = format!(
         r#"
         window.addEventListener('keydown', (e) => {{
@@ -59,7 +70,6 @@ async fn open_webview<R: Runtime>(
             }}
         }}
 
-        // Observe Title Changes (SPA navigations like Google Search tabs)
         let lastTitle = document.title;
         const observer = new MutationObserver(() => {{
             if (document.title !== lastTitle) {{
@@ -72,7 +82,6 @@ async fn open_webview<R: Runtime>(
             const titleEl = document.querySelector('title');
             if (titleEl) {{
                 observer.observe(titleEl, {{ subtree: true, characterData: true, childList: true }});
-                // Also observe head in case title is completely replaced
                 observer.observe(document.head, {{ childList: true }});
             }} else {{
                 setTimeout(startObserver, 500);
@@ -81,8 +90,23 @@ async fn open_webview<R: Runtime>(
         
         document.addEventListener('DOMContentLoaded', startObserver);
         startObserver();
+
+        // Stubborn sites JS enforcer
+        window.__RC_THEME__ = '{}';
+        function enforceTheme() {{
+            if (window.__RC_THEME__ === 'light') {{
+                document.documentElement.removeAttribute('dark');
+                document.documentElement.classList.remove('dark');
+                document.documentElement.style.colorScheme = 'light';
+            }} else {{
+                document.documentElement.setAttribute('dark', 'true');
+                document.documentElement.classList.add('dark');
+                document.documentElement.style.colorScheme = 'dark';
+            }}
+        }}
+        enforceTheme();
     "#,
-        label
+        label, theme
     );
 
     let builder = WebviewBuilder::new(&label, tauri::WebviewUrl::External(url_parsed.clone()))
@@ -95,45 +119,20 @@ async fn open_webview<R: Runtime>(
     let window_clone = window.clone();
     let builder = builder.on_download(move |_webview, event| {
         match event {
-            DownloadEvent::Requested {
-                url,
-                destination: _,
-            } => {
+            DownloadEvent::Requested { url, destination: _ } => {
                 #[derive(serde::Serialize, Clone)]
-                struct Payload {
-                    url: String,
-                    state: String,
-                    path: String,
-                }
-                let _ = window_clone.emit(
-                    "download-event",
-                    Payload {
-                        url: url.to_string(),
-                        state: "started".into(),
-                        path: "".into(),
-                    },
-                );
-                true // accept the download
+                struct Payload { url: String, state: String, path: String }
+                let _ = window_clone.emit("download-event", Payload { url: url.to_string(), state: "started".into(), path: "".into() });
+                true 
             }
             DownloadEvent::Finished { url, path, success } => {
                 #[derive(serde::Serialize, Clone)]
-                struct Payload {
-                    url: String,
-                    state: String,
-                    path: String,
-                }
-                let _ = window_clone.emit(
-                    "download-event",
-                    Payload {
-                        url: url.to_string(),
-                        state: if success {
-                            "finished".into()
-                        } else {
-                            "failed".into()
-                        },
-                        path: path.map_or("".to_string(), |p| p.to_string_lossy().into_owned()),
-                    },
-                );
+                struct Payload { url: String, state: String, path: String }
+                let _ = window_clone.emit("download-event", Payload {
+                    url: url.to_string(),
+                    state: if success { "finished".into() } else { "failed".into() },
+                    path: path.map_or("".to_string(), |p| p.to_string_lossy().into_owned()),
+                });
                 true
             }
             _ => true,
@@ -143,44 +142,66 @@ async fn open_webview<R: Runtime>(
     let window_clone2 = window.clone();
     let builder = builder.on_page_load(move |webview, payload| {
         #[derive(serde::Serialize, Clone)]
-        struct LoadPayload {
-            label: String,
-            url: String,
-            state: String,
-        }
-
+        struct LoadPayload { label: String, url: String, state: String }
         let state = match payload.event() {
             PageLoadEvent::Started => "started",
             PageLoadEvent::Finished => "finished",
         };
-
-        let _ = window_clone2.emit(
-            "page-load-event",
-            LoadPayload {
-                label: webview.label().to_string(),
-                url: payload.url().to_string(),
-                state: state.to_string(),
-            },
-        );
+        let _ = window_clone2.emit("page-load-event", LoadPayload {
+            label: webview.label().to_string(),
+            url: payload.url().to_string(),
+            state: state.to_string(),
+        });
     });
 
-    window
-        .add_child(
-            builder,
-            LogicalPosition::new(x, y),
-            LogicalSize::new(width, height),
-        )
-        .map_err(|e| e.to_string())?;
+    window.add_child(builder, LogicalPosition::new(x, y), LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
 #[tauri::command]
-async fn navigate_webview<R: tauri::Runtime>(
+async fn set_webview_theme<R: tauri::Runtime>(
     window: tauri::Window<R>,
     label: String,
-    url: String,
+    theme: String,
 ) -> Result<(), String> {
+    
+    // 1. NATIVE THEME SWITCHING (This is the magic that fixes prefers-color-scheme)
+    let tauri_theme = if theme == "dark" {
+        Some(Theme::Dark)
+    } else {
+        Some(Theme::Light)
+    };
+    let _ = window.set_theme(tauri_theme);
+
+    // 2. JS Fallback execution
+    if let Some(webview) = window.get_webview(&label) {
+        let js = format!(
+            r#"
+            window.__RC_THEME__ = '{}';
+            if (window.__RC_THEME__ === 'dark') {{
+                document.documentElement.setAttribute('dark', 'true');
+                document.documentElement.classList.add('dark');
+                document.cookie = 'PREF=f6=400; domain=.youtube.com; path=/';
+                document.documentElement.style.colorScheme = 'dark';
+            }} else {{
+                document.documentElement.removeAttribute('dark');
+                document.documentElement.classList.remove('dark');
+                document.cookie = 'PREF=f6=0; domain=.youtube.com; path=/';
+                document.documentElement.style.colorScheme = 'light';
+            }}
+            "#,
+            theme
+        );
+        webview.eval(&js).map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err("Webview not found".to_string())
+    }
+}
+
+#[tauri::command]
+async fn navigate_webview<R: tauri::Runtime>(window: tauri::Window<R>, label: String, url: String) -> Result<(), String> {
     if let Some(webview) = window.get_webview(&label) {
         let url_parsed = tauri::Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
         webview.navigate(url_parsed).map_err(|e| e.to_string())?;
@@ -191,11 +212,7 @@ async fn navigate_webview<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-async fn set_webview_visibility<R: tauri::Runtime>(
-    window: tauri::Window<R>,
-    label: String,
-    visible: bool,
-) -> Result<(), String> {
+async fn set_webview_visibility<R: tauri::Runtime>(window: tauri::Window<R>, label: String, visible: bool) -> Result<(), String> {
     if let Some(webview) = window.get_webview(&label) {
         if visible {
             webview.show().map_err(|e| e.to_string())?;
@@ -210,10 +227,7 @@ async fn set_webview_visibility<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-async fn close_webview<R: tauri::Runtime>(
-    window: tauri::Window<R>,
-    label: String,
-) -> Result<(), String> {
+async fn close_webview<R: tauri::Runtime>(window: tauri::Window<R>, label: String) -> Result<(), String> {
     if let Some(webview) = window.get_webview(&label) {
         webview.close().map_err(|e| e.to_string())?;
         Ok(())
@@ -223,21 +237,10 @@ async fn close_webview<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-async fn set_webview_bounds<R: tauri::Runtime>(
-    window: tauri::Window<R>,
-    label: String,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Result<(), String> {
+async fn set_webview_bounds<R: tauri::Runtime>(window: tauri::Window<R>, label: String, x: f64, y: f64, width: f64, height: f64) -> Result<(), String> {
     if let Some(webview) = window.get_webview(&label) {
-        webview
-            .set_position(LogicalPosition::new(x, y))
-            .map_err(|e| e.to_string())?;
-        webview
-            .set_size(LogicalSize::new(width, height))
-            .map_err(|e| e.to_string())?;
+        webview.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
+        webview.set_size(LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err("Webview not found".to_string())
@@ -247,9 +250,7 @@ async fn set_webview_bounds<R: tauri::Runtime>(
 #[tauri::command]
 async fn go_back<R: tauri::Runtime>(window: tauri::Window<R>, label: String) -> Result<(), String> {
     if let Some(webview) = window.get_webview(&label) {
-        webview
-            .eval("window.history.back()")
-            .map_err(|e| e.to_string())?;
+        webview.eval("window.history.back()").map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err("Webview not found".to_string())
@@ -257,14 +258,9 @@ async fn go_back<R: tauri::Runtime>(window: tauri::Window<R>, label: String) -> 
 }
 
 #[tauri::command]
-async fn go_forward<R: tauri::Runtime>(
-    window: tauri::Window<R>,
-    label: String,
-) -> Result<(), String> {
+async fn go_forward<R: tauri::Runtime>(window: tauri::Window<R>, label: String) -> Result<(), String> {
     if let Some(webview) = window.get_webview(&label) {
-        webview
-            .eval("window.history.forward()")
-            .map_err(|e| e.to_string())?;
+        webview.eval("window.history.forward()").map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err("Webview not found".to_string())
@@ -272,14 +268,9 @@ async fn go_forward<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-async fn reload_webview<R: tauri::Runtime>(
-    window: tauri::Window<R>,
-    label: String,
-) -> Result<(), String> {
+async fn reload_webview<R: tauri::Runtime>(window: tauri::Window<R>, label: String) -> Result<(), String> {
     if let Some(webview) = window.get_webview(&label) {
-        webview
-            .eval("window.location.reload()")
-            .map_err(|e| e.to_string())?;
+        webview.eval("window.location.reload()").map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err("Webview not found".to_string())
@@ -287,27 +278,17 @@ async fn reload_webview<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-async fn emit_spa_nav<R: tauri::Runtime>(
-    window: tauri::Window<R>,
-    label: String,
-) -> Result<(), String> {
+async fn emit_spa_nav<R: tauri::Runtime>(window: tauri::Window<R>, label: String) -> Result<(), String> {
     #[derive(serde::Serialize, Clone)]
-    struct Payload {
-        label: String,
-    }
+    struct Payload { label: String }
     let _ = window.emit("spa-navigation", Payload { label });
     Ok(())
 }
 
 #[tauri::command]
-async fn emit_shortcut_event<R: tauri::Runtime>(
-    window: tauri::Window<R>,
-    key: String,
-) -> Result<(), String> {
+async fn emit_shortcut_event<R: tauri::Runtime>(window: tauri::Window<R>, key: String) -> Result<(), String> {
     #[derive(serde::Serialize, Clone)]
-    struct Payload {
-        key: String,
-    }
+    struct Payload { key: String }
     let _ = window.emit("shortcut-event", Payload { key });
     Ok(())
 }
@@ -315,7 +296,6 @@ async fn emit_shortcut_event<R: tauri::Runtime>(
 #[tauri::command]
 async fn get_system_metrics(state: tauri::State<'_, SystemState>) -> Result<Metrics, String> {
     let mut sys = state.0.lock().unwrap();
-
     let pid = sysinfo::get_current_pid().unwrap();
     sys.refresh_process(pid);
 
@@ -324,22 +304,11 @@ async fn get_system_metrics(state: tauri::State<'_, SystemState>) -> Result<Metr
 
     if let Some(process) = sys.process(pid) {
         cpu_usage = process.cpu_usage();
-        used_memory = process.memory() / 1024 / 1024; // MB
+        used_memory = process.memory() / 1024 / 1024;
     }
 
-    // Simulate ping for now
-    let ping = 24
-        + (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            % 10);
-
-    Ok(Metrics {
-        cpu: cpu_usage,
-        ram: used_memory,
-        ping: ping,
-    })
+    let ping = 24 + (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() % 10);
+    Ok(Metrics { cpu: cpu_usage, ram: used_memory, ping })
 }
 
 fn main() {
@@ -362,6 +331,7 @@ fn main() {
         .manage(SystemState(Mutex::new(sys)))
         .invoke_handler(tauri::generate_handler![
             open_webview,
+            set_webview_theme,
             navigate_webview,
             close_webview,
             set_webview_visibility,

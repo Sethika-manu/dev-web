@@ -18,7 +18,6 @@ import { cn } from "../lib/utils";
 
 const appWindow = getCurrentWindow();
 
-
 interface Session {
   id: string;
   title: string;
@@ -28,7 +27,8 @@ interface Session {
 interface SidebarProps {
   sessions: Session[];
   activeSessionId: string | null;
-  activeView: 'browser' | 'settings' | 'console' | 'downloads';
+  // අලුතින් 'tabs' කියන type එක මෙතනට ඇඩ් කරා
+  activeView: 'browser' | 'settings' | 'console' | 'downloads' | 'tabs';
   onSessionSelect: (id: string) => void;
   onSessionClose: (id: string) => void;
   onNewSession: () => void;

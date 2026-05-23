@@ -17,13 +17,34 @@ export const Viewport = ({
   sessions: Session[], 
   activeSessionId: string | null,
   isPaletteOpen: boolean,
-  appView: 'browser' | 'settings' | 'console' | 'downloads'
+  appView: 'browser' | 'settings' | 'console' | 'downloads' | 'tabs'
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedWebviews = useRef<Set<string>>(new Set());
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const showLoading = activeSession && activeSession.url !== "" && !initializedWebviews.current.has(activeSessionId!);
+
+  // NEW: Detect theme changes and push to Native Webviews
+  useEffect(() => {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === 'class') {
+          const isDark = document.documentElement.classList.contains('dark');
+          const theme = isDark ? 'dark' : 'light';
+          
+          // Inject the new theme into every open session immediately
+          sessions.forEach(session => {
+            invoke('set_webview_theme', { label: session.id, theme })
+              .catch((e) => console.warn("Theme Sync Error:", e));
+          });
+        }
+      });
+    });
+
+    observer.observe(document.documentElement, { attributes: true });
+    return () => observer.disconnect();
+  }, [sessions]);
 
   // 1. Manage Lifecycle (Open/Close only)
   useEffect(() => {
@@ -49,6 +70,9 @@ export const Viewport = ({
             if (!targetUrl.startsWith("http") && isUrl) targetUrl = `https://${targetUrl}`;
             if (!isUrl) targetUrl = `https://google.com/search?q=${encodeURIComponent(targetUrl)}`;
 
+            // Get current app theme for initial load
+            const currentTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+
             try {
               await invoke("open_webview", {
                 label: session.id,
@@ -57,6 +81,7 @@ export const Viewport = ({
                 y: rect.y,
                 width: rect.width,
                 height: rect.height,
+                theme: currentTheme, // NEW: Send theme on startup
               }).catch((e) => console.warn("Open Error:", e));
               initializedWebviews.current.add(session.id);
             } catch (e) {}
@@ -94,11 +119,9 @@ export const Viewport = ({
           return;
         }
         
-        // Use getBoundingClientRect for absolute window coordinates
         const rect = containerRef.current.getBoundingClientRect();
 
-        // IF APP IS IN SETTINGS/CONSOLE/DOWNLOADS: Move webviews off-screen immediately
-        if (appView === 'settings' || appView === 'console' || appView === 'downloads') {
+        if (appView === 'settings' || appView === 'console' || appView === 'downloads' || appView === 'tabs') {
           for (const label of initializedWebviews.current) {
             await invoke("set_webview_bounds", { 
               label, 
@@ -112,19 +135,16 @@ export const Viewport = ({
           return;
         }
 
-        // IF IN BROWSER MODE: Sync active session or move off-screen
         for (const session of sessions) {
           const isCurrentlyActive = session.id === activeSessionId && !isPaletteOpen && appView === 'browser';
           
           if (isCurrentlyActive) {
-            // FAILSAFE: If dimensions are 0, retry in next frame to handle React transitions
             if (rect.width === 0 || rect.height === 0) {
               isSyncing = false;
               frameId = requestAnimationFrame(syncBounds);
               return;
             }
 
-            // Await is REQUIRED here to prevent flooding the Tauri IPC channel (which causes black screens/crashes)
             await invoke("set_webview_bounds", {
               label: session.id,
               x: rect.x,
@@ -133,7 +153,6 @@ export const Viewport = ({
               height: rect.height,
             }).catch((e) => console.warn("Bounds Sync Error:", e));
           } else {
-            // Off-screen for non-active sessions
             await invoke("set_webview_bounds", {
               label: session.id,
               x: -10000,
@@ -151,7 +170,6 @@ export const Viewport = ({
     };
 
     const observer = new ResizeObserver((entries) => {
-      // Trigger sync whenever the container size changes
       if (entries.length > 0) {
         syncBounds();
       }
@@ -161,7 +179,6 @@ export const Viewport = ({
       observer.observe(containerRef.current);
     }
 
-    // Trigger initial sync for view state changes
     syncBounds();
 
     return () => {
@@ -176,8 +193,8 @@ export const Viewport = ({
       className="absolute inset-0 bg-transparent flex items-center justify-center pointer-events-none z-0"
     >
       {showLoading && (
-        <div className="flex flex-col items-center gap-4 text-neutral-800 pointer-events-auto">
-          <div className="w-8 h-8 border-2 border-white/5 border-t-accent/20 rounded-full animate-spin" />
+        <div className="flex flex-col items-center gap-4 text-neutral-800 dark:text-neutral-200 pointer-events-auto">
+          <div className="w-8 h-8 border-2 border-neutral-200 dark:border-white/5 border-t-accent rounded-full animate-spin" />
           <p className="text-[10px] font-mono uppercase tracking-[0.2em]">
             Initializing...
           </p>

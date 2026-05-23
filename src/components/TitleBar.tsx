@@ -95,14 +95,14 @@ export const TitleBar = ({ onNavigate, searchValue, onSearchChange, activeSessio
       onMouseDown={handleMouseDownDrag}
       className="h-12 bg-[#0a0a0a] border-b border-white/5 flex items-center justify-between px-4 select-none cursor-default active:cursor-grabbing"
     >
-      <div data-tauri-drag-region className="flex items-center gap-3 w-1/4 h-full pointer-events-none">
-        <div className="w-2.5 h-2.5 bg-accent rounded-full shadow-[0_0_10px_rgba(var(--accent-rgb),0.5)]" />
-        <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-neutral-500">
-          RCBROWSING <span className="text-neutral-700 font-normal">v{appVersion}</span>
-        </span>
-      </div>
+      <div data-tauri-drag-region className="flex items-center gap-3 w-1/4 h-full pointer-events-none hidden md:flex">
+          <div className="w-2.5 h-2.5 bg-accent rounded-full shadow-[0_0_10px_rgba(var(--accent-rgb),0.5)]" />
+          <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-neutral-500">
+            RCBROWSING <span className="text-neutral-700 font-normal">{appVersion}</span>
+          </span>
+        </div>
 
-      <div className="flex-1 max-w-2xl flex items-center gap-2 h-full">
+      <div className="flex-1 w-full max-w-md mx-auto flex items-center gap-2 h-full">
         {activeSessionId && (
           <div className="flex items-center gap-1 mr-2">
             <button
