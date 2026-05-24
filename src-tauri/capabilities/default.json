@@ -11,7 +11,6 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    
     {
       "identifier": "core:webview:allow-create-webview",
       "allow": [
@@ -42,8 +41,6 @@
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
     "core:window:allow-close",
-    "core:window:allow-start-dragging",
-    "updater:default",
-    "process:default"
+    "core:window:allow-start-dragging"
   ]
 }
