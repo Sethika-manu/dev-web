@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { X, Minus, Square, Copy, Search, ArrowLeft, ArrowRight, RotateCw } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 
 const appWindow = getCurrentWindow();
@@ -16,6 +15,12 @@ interface TitleBarProps {
 export const TitleBar = ({ onNavigate, searchValue, onSearchChange, activeSessionId }: TitleBarProps) => {
   const [isMaximized, setIsMaximized] = useState(false);
   const [appVersion, setAppVersion] = useState("0.1.0");
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    setIsMobile(checkMobile);
+  }, []);
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch((err) => {
@@ -62,21 +67,39 @@ export const TitleBar = ({ onNavigate, searchValue, onSearchChange, activeSessio
     }
   };
 
-  const handleGoBack = () => {
+  const handleGoBack = async () => {
     if (activeSessionId) {
-      invoke("go_back", { label: activeSessionId }).catch(() => {});
+      const win = window as any;
+      if (isMobile && (win.NativeBridge || win.AndroidBridge)) {
+         // Android Bridge එකට Back කමාන්ඩ් එක දෙනවා
+        (win.NativeBridge || win.AndroidBridge).goBack();
+      } else {
+         console.warn("Native bridge not found for goBack");
+      }
     }
   };
 
-  const handleGoForward = () => {
+  const handleGoForward = async () => {
     if (activeSessionId) {
-      invoke("go_forward", { label: activeSessionId }).catch(() => {});
+      const win = window as any;
+      if (isMobile && (win.NativeBridge || win.AndroidBridge)) {
+        // Android Bridge එකට Forward කමාන්ඩ් එක දෙනවා
+        (win.NativeBridge || win.AndroidBridge).goForward();
+      } else {
+        console.warn("Native bridge not found for goForward");
+      }
     }
   };
 
-  const handleReload = () => {
+  const handleReload = async () => {
     if (activeSessionId) {
-      invoke("reload_webview", { label: activeSessionId }).catch(() => {});
+      const win = window as any;
+      if (isMobile && (win.NativeBridge || win.AndroidBridge)) {
+        // Android Bridge එකට Reload කමාන්ඩ් එක දෙනවා
+        (win.NativeBridge || win.AndroidBridge).reload();
+      } else {
+        console.warn("Native bridge not found for reload");
+      }
     }
   };
 
@@ -91,11 +114,11 @@ export const TitleBar = ({ onNavigate, searchValue, onSearchChange, activeSessio
 
   return (
     <header
-      data-tauri-drag-region
-      onMouseDown={handleMouseDownDrag}
-      className="h-12 bg-[#0a0a0a] border-b border-white/5 flex items-center justify-between px-4 select-none cursor-default active:cursor-grabbing"
+      data-tauri-drag-region={isMobile ? undefined : ""}
+      onMouseDown={isMobile ? undefined : handleMouseDownDrag}
+      className="bg-[#0a0a0a] border-b border-white/5 flex items-center justify-between px-4 select-none cursor-default active:cursor-grabbing h-12 w-full"
     >
-      <div data-tauri-drag-region className="flex items-center gap-3 w-1/4 h-full pointer-events-none hidden md:flex">
+      <div data-tauri-drag-region={isMobile ? undefined : ""} className="flex items-center gap-3 w-1/4 h-full pointer-events-none hidden md:flex">
           <div className="w-2.5 h-2.5 bg-accent rounded-full shadow-[0_0_10px_rgba(var(--accent-rgb),0.5)]" />
           <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-neutral-500">
             RCBROWSING <span className="text-neutral-700 font-normal">{appVersion}</span>
@@ -145,11 +168,11 @@ export const TitleBar = ({ onNavigate, searchValue, onSearchChange, activeSessio
             className="w-full bg-neutral-900/50 border border-white/5 rounded-lg py-1.5 pl-9 pr-4 text-xs text-neutral-300 placeholder:text-neutral-600 focus:outline-none focus:border-accent/30 focus:bg-neutral-900/80 transition-all"
           />
         </form>
-        <div data-tauri-drag-region className="w-4 h-full" />
+        <div data-tauri-drag-region={isMobile ? undefined : ""} className="w-4 h-full" />
       </div>
 
-      <div className="flex items-center gap-1 w-1/4 justify-end h-full">
-        <div data-tauri-drag-region className="flex-1 h-full" />
+      <div className="flex items-center gap-1 w-1/4 justify-end h-full hidden md:flex">
+        <div data-tauri-drag-region={isMobile ? undefined : ""} className="flex-1 h-full" />
         <button
           onClick={handleMinimize}
           onMouseDown={(e) => e.stopPropagation()}

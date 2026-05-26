@@ -16,6 +16,9 @@ export const StatusBar = () => {
   });
 
   useEffect(() => {
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    if (isMobile) return;
+
     const fetchMetrics = async () => {
       try {
         const data = await invoke<Metrics>("get_system_metrics");
@@ -31,7 +34,7 @@ export const StatusBar = () => {
   }, []);
 
   return (
-    <div className="h-8 bg-background border-t border-border flex items-center justify-between px-4 select-none">
+    <div className="h-8 bg-background border-t border-border flex items-center justify-between px-4 select-none status-bar-container">
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2 group cursor-help">
           <Cpu size={16} className="text-accent" />

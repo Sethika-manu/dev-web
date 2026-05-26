@@ -23,8 +23,8 @@ serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 sysinfo = "0.30"
 tauri = { version = "2.0.0", features = ["devtools", "unstable"] }
-
 tauri-plugin-dialog = "2.0.0-alpha.2"
+
 
 
 [features]

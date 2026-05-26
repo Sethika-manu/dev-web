@@ -6,6 +6,10 @@
   color-scheme: dark;
 }
 
+body, html, #root {
+  background-color: transparent !important;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -49,4 +53,23 @@ body {
 /* Borderless Window Dragging */
 [data-tauri-drag-region] {
   cursor: default;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+@media (max-width: 768px) {
+  [data-tauri-drag-region] {
+    -webkit-app-region: no-drag !important;
+    app-region: no-drag !important;
+    pointer-events: auto !important;
+  }
+  .settings-productivity-section {
+    display: none !important;
+  }
+  .mobile-nav-console {
+    display: none !important;
+  }
+  .status-bar-container {
+    display: none !important;
+  }
 }

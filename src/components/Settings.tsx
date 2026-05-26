@@ -246,7 +246,7 @@ export const Settings = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.1 }}
-              className="space-y-4"
+              className={`space-y-4 ${section.title === 'Productivity' ? 'settings-productivity-section' : ''}`}
             >
               <h2 className="text-xs font-bold text-neutral-500 dark:text-neutral-600 uppercase tracking-widest px-1">
                 {section.title}

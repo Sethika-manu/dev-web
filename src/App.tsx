@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { TitleBar } from "./components/TitleBar";
 import { Sidebar } from "./components/Sidebar";
@@ -22,12 +22,10 @@ import {
   Layers 
 } from "lucide-react";
 
-import { listen } from "@tauri-apps/api/event";
 import { logEvent } from "firebase/analytics";
 import { analytics } from "./firebase";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-// NEW: Native Dialog Import
 import { ask } from "@tauri-apps/plugin-dialog";
 
 interface Session {
@@ -71,7 +69,65 @@ export default function App() {
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
 
-  // NEW: Update Logic using Native Dialog (Overlaps Webview safely)
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const checkMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    setIsMobile(checkMobile);
+  }, []);
+
+  const sessionsRef = useRef(sessions);
+  const activeSessionIdRef = useRef(activeSessionId);
+  const lastLoadedUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (isMobile) {
+      (window as any).onNativeUrlChanged = (url: string) => {
+        const currentActiveId = activeSessionIdRef.current;
+        if (currentActiveId) {
+          lastLoadedUrlRef.current = url;
+          setSessions(prev => prev.map(s => s.id === currentActiveId ? { ...s, url, title: (url === "about:blank" || url === "") ? "New Tab" : url } : s));
+          setSearchValue(url === "about:blank" ? "" : url);
+        }
+      };
+    }
+    return () => {
+      delete (window as any).onNativeUrlChanged;
+    };
+  }, [isMobile]);
+
+  const lastActiveId = useRef<string | null>(null);
+  useEffect(() => {
+    const syncTabSwitch = async () => {
+      if (isMobile && activeSessionId && activeSessionId !== lastActiveId.current) {
+        lastActiveId.current = activeSessionId;
+        const active = sessionsRef.current.find(s => s.id === activeSessionId);
+        if (active && active.url && active.url !== "about:blank" && active.url !== "") {
+          if (lastLoadedUrlRef.current !== active.url) {
+            lastLoadedUrlRef.current = active.url;
+            const win = window as any;
+            if (win.NativeBridge || win.AndroidBridge) {
+              (win.NativeBridge || win.AndroidBridge).loadNativeUrl(active.url);
+            }
+          }
+        } else {
+            const win = window as any;
+            if (win.NativeBridge || win.AndroidBridge) {
+              (win.NativeBridge || win.AndroidBridge).loadNativeUrl("");
+            }
+        }
+      }
+    };
+    syncTabSwitch();
+  }, [activeSessionId, isMobile]);
+
   useEffect(() => {
     try {
       if (analytics) {
@@ -90,7 +146,6 @@ export default function App() {
             await update.downloadAndInstall();
             await relaunch();
           } else {
-            // NATIVE DIALOG: Always shows on top of Native Webviews doned
             const wantsUpdate = await ask(
               `A new version v${update.version} is ready to install.\n\nUpdate now to get the latest features and security patches.`,
               {
@@ -121,7 +176,6 @@ export default function App() {
     checkForUpdates();
   }, []);
 
-  // Sync sessions to localStorage if restore tabs is enabled
   useEffect(() => {
     if (localStorage.getItem('rc_restore_tabs') === 'true') {
       localStorage.setItem('rc_saved_sessions', JSON.stringify(sessions));
@@ -135,166 +189,6 @@ export default function App() {
       localStorage.removeItem('rc_active_session');
     }
   }, [sessions, activeSessionId]);
-
-  // Global Download Listener for Toast & Sidebar Animation
-  useEffect(() => {
-    const unlisten = listen<any>('download-event', (event) => {
-      const payload = event.payload;
-      if (payload.state === 'started') {
-        setIsDownloading(true);
-        setToastMessage({ title: 'Download Started', desc: payload.url.split('/').pop() || 'File downloading' });
-        setTimeout(() => setToastMessage(null), 3000);
-      } else if (payload.state === 'finished' || payload.state === 'failed') {
-        setIsDownloading(false);
-        setToastMessage({ title: payload.state === 'finished' ? 'Download Complete' : 'Download Failed', desc: payload.url.split('/').pop() || 'File' });
-        setTimeout(() => setToastMessage(null), 3000);
-
-        const saved = localStorage.getItem('rc_download_history');
-        let currentHistory = [];
-        if (saved) {
-          try {
-            currentHistory = JSON.parse(saved);
-            if (!Array.isArray(currentHistory)) currentHistory = [];
-          } catch (e) {
-            currentHistory = [];
-          }
-        }
-
-        const newItem = {
-          id: Math.random().toString(36).substring(7) + '-' + Date.now(),
-          url: payload.url,
-          path: payload.path,
-          timestamp: Date.now(),
-          status: payload.state === 'finished' ? 'completed' : 'failed'
-        };
-
-        const updatedHistory = [newItem, ...currentHistory];
-        localStorage.setItem('rc_download_history', JSON.stringify(updatedHistory));
-        window.dispatchEvent(new CustomEvent('rc-download-finished', { detail: newItem }));
-      }
-    });
-
-    return () => {
-      unlisten.then(fn => fn());
-    };
-  }, []);
-
-  // Global Loading Progress Bar Logic
-  useEffect(() => {
-    let timers: Record<string, NodeJS.Timeout> = {};
-    let debounceTimers: Record<string, NodeJS.Timeout> = {};
-
-    const handleNativeStart = (label: string) => {
-      setProgressStates(prev => ({ ...prev, [label]: 10 }));
-      if (timers[label]) clearInterval(timers[label]);
-      timers[label] = setInterval(() => {
-        setProgressStates(prev => {
-          const current = prev[label] || 10;
-          if (current >= 85) {
-            clearInterval(timers[label]);
-            return prev;
-          }
-          return { ...prev, [label]: current + (85 - current) * 0.1 };
-        });
-      }, 500);
-    };
-
-    const handleNativeEnd = (label: string) => {
-      if (timers[label]) {
-        clearInterval(timers[label]);
-        delete timers[label];
-      }
-      setProgressStates(prev => ({ ...prev, [label]: 100 }));
-      setTimeout(() => {
-        setProgressStates(prev => {
-          if (prev[label] === 100) return { ...prev, [label]: 0 };
-          return prev;
-        });
-      }, 400);
-    };
-
-    const handleFakePulse = (label: string) => {
-      if (debounceTimers[label]) return;
-      setProgressStates(prev => ({ ...prev, [label]: 30 }));
-      setTimeout(() => {
-        setProgressStates(prev => ({ ...prev, [label]: 80 }));
-        setTimeout(() => {
-          setProgressStates(prev => ({ ...prev, [label]: 100 }));
-          setTimeout(() => {
-            setProgressStates(prev => {
-              if (prev[label] === 100) return { ...prev, [label]: 0 };
-              return prev;
-            });
-          }, 300);
-        }, 500);
-      }, 50);
-
-      debounceTimers[label] = setTimeout(() => {
-        delete debounceTimers[label];
-      }, 1000);
-    };
-
-    const unlisten1 = listen<any>('page-load-event', (event) => {
-      const payload = event.payload;
-      if (payload.state === 'started') handleNativeStart(payload.label);
-      else handleNativeEnd(payload.label);
-    });
-
-    const unlisten2 = listen<any>('spa-navigation', (event) => {
-      handleFakePulse(event.payload.label);
-    });
-
-    const unlisten3 = listen<any>('tauri://load-start', (event) => {
-       if ((event as any).windowLabel) handleNativeStart((event as any).windowLabel);
-    });
-    const unlisten4 = listen<any>('tauri://loading-progress', (event) => {});
-    const unlisten5 = listen<any>('tauri://load-finish', (event) => {
-       if ((event as any).windowLabel) handleNativeEnd((event as any).windowLabel);
-    });
-
-    return () => {
-      unlisten1.then(fn => fn());
-      unlisten2.then(fn => fn());
-      unlisten3.then(fn => fn());
-      unlisten4.then(fn => fn());
-      unlisten5.then(fn => fn());
-      Object.values(timers).forEach(clearInterval);
-      Object.values(debounceTimers).forEach(clearTimeout);
-    };
-  }, []);
-
-  // UX Loading Pulse for Tab/Session Switching
-  useEffect(() => {
-    if (activeSessionId) {
-      setProgressStates(prev => {
-        if (prev[activeSessionId] > 0 && prev[activeSessionId] < 100) return prev;
-        return { ...prev, [activeSessionId]: 30 };
-      });
-      
-      const t1 = setTimeout(() => {
-        setProgressStates(prev => {
-          if (prev[activeSessionId] > 30 && prev[activeSessionId] < 100) return prev;
-          return { ...prev, [activeSessionId]: 100 };
-        });
-        
-        setTimeout(() => {
-          setProgressStates(prev => {
-            if (prev[activeSessionId] === 100) return { ...prev, [activeSessionId]: 0 };
-            return prev;
-          });
-        }, 400);
-      }, 450);
-      
-      return () => clearTimeout(t1);
-    }
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    const unlisten = listen("shortcut-event", (event: any) => {
-      if (event.payload.key === "k") setIsPaletteOpen(true);
-    });
-    return () => { unlisten.then(fn => fn()); };
-  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -310,31 +204,51 @@ export default function App() {
 
   useEffect(() => {
     if (activeSession) {
-      setSearchValue(activeSession.url === "about:blank" ? "" : activeSession.url);
+      setSearchValue((activeSession.url === "about:blank" || activeSession.url === "") ? "" : activeSession.url);
     } else {
       setSearchValue("");
     }
   }, [activeSessionId, activeSession?.url]);
 
-  const handleNavigate = (url: string) => {
+  const handleNavigate = async (url: string) => {
     if (!activeSessionId) {
       handleCreateSession(url);
       setAppView('browser');
       return;
     }
-    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, url, title: url } : s));
+    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, url, title: (url === "about:blank" || url === "") ? "New Tab" : url } : s));
     setSearchValue(url);
+
+    if (isMobile) {
+      if (lastLoadedUrlRef.current !== url) {
+        lastLoadedUrlRef.current = url;
+        const win = window as any;
+        if (win.NativeBridge || win.AndroidBridge) {
+          (win.NativeBridge || win.AndroidBridge).loadNativeUrl(url);
+        }
+      }
+    }
   };
 
-  const handleCreateSession = (url: string = "") => {
+  const handleCreateSession = async (url: string = "") => {
     const newSession: Session = {
       id: Math.random().toString(36).substring(7),
-      title: url === "" ? "New Tab" : url,
+      title: (url === "" || url === "about:blank") ? "New Tab" : url,
       url: url
     };
     setSessions(prev => [...prev, newSession]);
     setActiveSessionId(newSession.id);
     setAppView('browser');
+
+    if (isMobile && url !== "") {
+      if (lastLoadedUrlRef.current !== url) {
+        lastLoadedUrlRef.current = url;
+        const win = window as any;
+        if (win.NativeBridge || win.AndroidBridge) {
+          (win.NativeBridge || win.AndroidBridge).loadNativeUrl(url);
+        }
+      }
+    }
   };
 
   const handleCloseSession = (id: string) => {
@@ -351,6 +265,22 @@ export default function App() {
     setActiveSessionId(null);
     setSearchValue("");
     setAppView('browser');
+    if (isMobile) {
+      const win = window as any;
+      if (win.NativeBridge || win.AndroidBridge) {
+        (win.NativeBridge || win.AndroidBridge).loadNativeUrl("");
+      }
+    }
+  };
+
+  const handleNavClick = (view: 'settings' | 'console' | 'downloads' | 'tabs') => {
+    setAppView(view);
+    if (isMobile) {
+      const win = window as any;
+      if (win.NativeBridge || win.AndroidBridge) {
+        (win.NativeBridge || win.AndroidBridge).loadNativeUrl("");
+      }
+    }
   };
 
   return (
@@ -359,9 +289,15 @@ export default function App() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.8 }}
-      className="flex flex-col h-screen bg-white dark:bg-[#0a0a0a] text-neutral-900 dark:text-white overflow-hidden font-sans transition-colors duration-200"
+      className={`flex flex-col h-screen text-neutral-900 dark:text-white overflow-hidden font-sans transition-colors duration-200 ${appView === 'browser' && activeSessionId ? 'bg-transparent' : 'bg-white dark:bg-[#0a0a0a]'}`}
     >
-      <div className="relative z-[100]">
+      <div 
+        id="top-bar-container"
+        className="w-full bg-gray-900 dark:bg-gray-900 border-b border-white/5 flex-shrink-0 relative"
+        style={{
+          paddingTop: "env(safe-area-inset-top, 0px)"
+        }}
+      >
         <TitleBar 
           onNavigate={handleNavigate} 
           searchValue={searchValue}
@@ -393,55 +329,58 @@ export default function App() {
             onNewSession={() => handleCreateSession()}
             onHomeClick={handleGoHome}
             onSearchClick={() => setIsPaletteOpen(true)}
-            onSettingsClick={() => setAppView('settings')}
-            onConsoleClick={() => setAppView('console')}
-            onDownloadsClick={() => setAppView('downloads')}
+            onSettingsClick={() => handleNavClick('settings')}
+            onConsoleClick={() => handleNavClick('console')}
+            onDownloadsClick={() => handleNavClick('downloads')}
             activeView={appView}
             isDownloading={isDownloading}
           />
         </div>
         
-        <main className="flex-1 relative overflow-hidden bg-white dark:bg-[#0a0a0a] z-0 transition-colors duration-200">
-          <div className={`absolute top-0 left-0 right-0 bottom-[68px] md:bottom-0 z-0 ${appView === 'browser' ? 'visible' : 'invisible pointer-events-none'}`}>
+        <main 
+          className="flex-1 relative overflow-hidden bg-transparent z-0 transition-colors duration-200"
+        >
+          <div className={`absolute inset-0 z-0 ${appView === 'browser' ? 'visible' : 'invisible pointer-events-none'}`}>
             <Viewport sessions={sessions} activeSessionId={activeSessionId} isPaletteOpen={isPaletteOpen} appView={appView} />
           </div>
 
-          <div className="absolute top-0 left-0 right-0 bottom-[68px] md:bottom-0 z-10">
+          <div className="absolute inset-0 z-10 pointer-events-none">
             {(() => {
-              if (appView === 'settings') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a]"><Settings /></div>;
-              if (appView === 'console') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a]"><Console /></div>;
-              if (appView === 'downloads') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a]"><Downloads /></div>;
+              if (appView === 'settings') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Settings /></div>;
+              if (appView === 'console') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Console /></div>;
+              if (appView === 'downloads') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Downloads /></div>;
               if (appView === 'browser') {
-                const isHomeVisible = !activeSessionId || (activeSession && activeSession.url === "");
-                if (isHomeVisible) return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a]"><Home onNavigate={handleNavigate} /></div>;
+                // මෙතන තමයි fix එක තියෙන්නේ: about:blank ආවත් Home Screen එක පේනවා
+                const isHomeVisible = !activeSessionId || (activeSession && (activeSession.url === "" || activeSession.url === "about:blank"));
+                if (isHomeVisible) return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Home onNavigate={handleNavigate} /></div>;
               }
               if (appView === 'tabs') {
                 return (
-                  <div className="absolute inset-0 z-20 bg-neutral-50 dark:bg-[#0a0a0a] overflow-y-auto p-4 pb-20">
+                  <div className="absolute inset-0 z-20 bg-neutral-50 dark:bg-[#0a0a0a] overflow-y-auto p-4 pb-20 pointer-events-auto">
                     <div className="flex justify-between items-center mb-6 mt-2 px-1">
                       <h2 className="text-xl font-bold text-neutral-900 dark:text-white tracking-tight">Open Tabs</h2>
-                      <button onClick={() => handleCreateSession("")} className="bg-accent hover:bg-accent/90 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-lg transition-all active:scale-95">+ New Tab</button>
+                      <button onClick={() => handleCreateSession("")} className="bg-accent hover:bg-accent/90 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-lg transition-all active:scale-95 pointer-events-auto">+ New Tab</button>
                     </div>
                     {sessions.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center h-48 text-neutral-400 dark:text-neutral-500">
+                      <div className="flex flex-col items-center justify-center h-48 text-neutral-400 dark:text-neutral-500 pointer-events-auto">
                         <Layers size={40} className="mb-3 opacity-50" />
                         <p>No tabs open</p>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-2 gap-4 pointer-events-auto">
                         {sessions.map(session => (
                           <div 
                             key={session.id} 
                             onClick={() => { setActiveSessionId(session.id); setAppView('browser'); }}
-                            className={`relative p-4 rounded-2xl flex flex-col gap-2 cursor-pointer transition-all ${activeSessionId === session.id ? 'bg-white dark:bg-neutral-900 border-2 border-accent shadow-md' : 'bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm'}`}
+                            className={`relative p-4 rounded-2xl flex flex-col gap-2 cursor-pointer transition-all ${activeSessionId === session.id ? 'bg-white dark:bg-neutral-900 border-2 border-accent shadow-md' : 'bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm'} pointer-events-auto`}
                           >
-                            <div className="flex justify-between items-start">
-                              <span className="text-sm font-semibold text-neutral-900 dark:text-white truncate pr-6">{session.title || 'New Tab'}</span>
-                              <button onClick={(e) => { e.stopPropagation(); handleCloseSession(session.id); }} className="absolute top-3 right-3 text-neutral-400 hover:text-red-500 bg-neutral-100 dark:bg-neutral-800 rounded-full p-1 shadow-sm transition-colors">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                            <div className="flex justify-between items-start pointer-events-auto">
+                              <span className="text-sm font-semibold text-neutral-900 dark:text-white truncate pr-6 pointer-events-auto">{session.title || 'New Tab'}</span>
+                              <button onClick={(e) => { e.stopPropagation(); handleCloseSession(session.id); }} className="absolute top-3 right-3 text-neutral-400 hover:text-red-500 bg-neutral-100 dark:bg-neutral-800 rounded-full p-1 shadow-sm transition-colors pointer-events-auto">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-auto"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                               </button>
                             </div>
-                            <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{session.url || 'about:blank'}</div>
+                            <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate pointer-events-auto">{session.url || 'about:blank'}</div>
                           </div>
                         ))}
                       </div>
@@ -453,27 +392,6 @@ export default function App() {
             })()}
           </div>
           
-          <nav className="md:hidden absolute bottom-0 left-0 right-0 h-[68px] bg-neutral-50 dark:bg-[#0c0c0c] border-t border-neutral-200 dark:border-neutral-800/80 z-[100] flex items-center justify-around px-2 pb-1">
-            <button onClick={handleGoHome} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
-              <HomeIcon size={20} className="mb-1" /><span>Home</span>
-            </button>
-            <button onClick={() => setAppView('tabs')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors relative">
-              <div className="relative mb-1">
-                <Layers size={20} />
-                {sessions.length > 0 && <span className="absolute -top-1.5 -right-2 bg-accent text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-neutral-50 dark:border-[#0c0c0c]">{sessions.length}</span>}
-              </div>
-              <span>Tabs</span>
-            </button>
-            <button onClick={() => setAppView('downloads')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
-              <Download size={20} className="mb-1" /><span>Downloads</span>
-            </button>
-            <button onClick={() => setAppView('console')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
-              <Terminal size={20} className="mb-1" /><span>Console</span>
-            </button>
-            <button onClick={() => setAppView('settings')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
-              <SettingsIcon size={20} className="mb-1" /><span>Settings</span>
-            </button>
-          </nav>
         </main>
       </div>
 
@@ -489,8 +407,37 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <div className="hidden md:block">
-        <StatusBar />
+      {/* Bottom Footer Section */}
+      <div id="bottom-bar-container" className="flex-shrink-0 w-full z-[99999] relative bg-gray-900 dark:bg-gray-900">
+        <nav 
+          className="md:hidden w-full h-[calc(68px+env(safe-area-inset-bottom,0px))] bg-gray-900 dark:bg-gray-900 border-t border-neutral-200 dark:border-neutral-800/80 flex items-center justify-around px-2"
+          style={{
+            paddingBottom: "env(safe-area-inset-bottom, 0px)"
+          }}
+        >
+          <button onClick={handleGoHome} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
+            <HomeIcon size={20} className="mb-1" /><span>Home</span>
+          </button>
+          <button onClick={() => handleNavClick('tabs')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors relative">
+            <div className="relative mb-1">
+              <Layers size={20} />
+              {sessions.length > 0 && <span className="absolute -top-1.5 -right-2 bg-accent text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-[#0c0c0c] dark:border-[#0c0c0c]">{sessions.length}</span>}
+            </div>
+            <span>Tabs</span>
+          </button>
+          <button onClick={() => handleNavClick('downloads')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
+            <Download size={20} className="mb-1" /><span>Downloads</span>
+          </button>
+          <button onClick={() => handleNavClick('console')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors mobile-nav-console">
+            <Terminal size={20} className="mb-1" /><span>Console</span>
+          </button>
+          <button onClick={() => handleNavClick('settings')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
+            <SettingsIcon size={20} className="mb-1" /><span>Settings</span>
+          </button>
+        </nav>
+        <div className="hidden md:block">
+          <StatusBar />
+        </div>
       </div>
       <CommandPalette isOpen={isPaletteOpen} onClose={() => setIsPaletteOpen(false)} onNavigate={handleNavigate} />
     </motion.div>

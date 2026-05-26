@@ -155,7 +155,15 @@ export const Home = ({ onNavigate }: HomeProps) => {
             return (
               <div 
                 key={site.url}
-                onClick={() => onNavigate(site.url)}
+                onClick={() => {
+                  const targetUrl = site.url;
+                  if ((window as any).NativeBridge) {
+                    (window as any).NativeBridge.loadNativeUrl(targetUrl);
+                  } else {
+                    console.error("NativeBridge is not available");
+                  }
+                  onNavigate(targetUrl);
+                }}
                 className="p-4 rounded-xl bg-neutral-100/50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-border text-left hover:border-accent/30 dark:hover:border-accent/30 transition-colors cursor-pointer group shadow-sm dark:shadow-none"
               >
                 <div className={`text-[10px] font-bold ${labelColor} mb-1 uppercase tracking-widest`}>
