@@ -4,10 +4,10 @@
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRblg1c2pQL3FCWGk4UnBDQmp2UlBacmpiZnlUYzhUZUQ1QmFyWWtBcDJvdnpYaStKa1QvUEd5eTUxVmUxODJyR2ZQL2Q5ZkpVRUlJei8yZzE3K0d1VXdSWGtuWHB3aVE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc5ODI4MDc5CWZpbGU6UkNCcm93c2VyXzEuMS43X3g2NC1zZXR1cC5leGUKN2lIMnl2U3NuWWZvSkNlS0JTN1FlWlRXWkRmajk5ME5rdnR6c3l3NmN3SHVTTC9OSDBlQXQrTjNySnhBbUNVUDVkZnNqTlFwTFVYNUNTVUxNZ2NoQ3c9PQo=",
-      "url": "https://github.com/Sethika-manu/dev-web/releases/download/v1.1.7/RCBrowser_1.1.7_x64-setup.exe"
+      "url": "https://github.com/Sethika-manu/dev-web/releases/download/v1.2.1/RCBrowser_1.2.1_x64-setup.exe"
     },
     "android": {
-      "url": "https://github.com/Sethika-manu/dev-web/releases/download/v1.1.7/RCBrowser-Final-Fixed.apk"
+      "url": "https://github.com/Sethika-manu/dev-web/releases/download/v1.2.1/RCBrowser-Final-Fixed.apk"
     }
   }
 }
