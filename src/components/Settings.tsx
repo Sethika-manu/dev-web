@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useSettings } from "./SettingsContext";
+import { getVersion } from "@tauri-apps/api/app";
 
 type Language = 'English (US)' | 'Sinhala (LK)' | 'Singlish';
 
@@ -105,6 +106,14 @@ export const Settings = () => {
     autoHideSidebar, setAutoHideSidebar // Extracted from context
   } = useSettings();
 
+  const [appVersion, setAppVersion] = useState("0.1.0");
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch((err) => {
+      console.error("Failed to get app version:", err);
+    });
+  }, []);
+
   const t = TRANSLATIONS[language];
 
   const cycleTheme = () => {
@@ -132,7 +141,7 @@ export const Settings = () => {
   const [autoUpdate, setAutoUpdate] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem('rcbrowsing_autoupdate');
+    const stored = localStorage.getItem('rcbrowser_autoupdate');
     if (stored !== null) {
       setAutoUpdate(stored === 'true');
     }
@@ -141,7 +150,7 @@ export const Settings = () => {
   const handleAutoUpdateChange = () => {
     const newVal = !autoUpdate;
     setAutoUpdate(newVal);
-    localStorage.setItem('rcbrowsing_autoupdate', String(newVal));
+    localStorage.setItem('rcbrowser_autoupdate', String(newVal));
   };
 
   const sections: SettingSection[] = [
@@ -296,10 +305,10 @@ export const Settings = () => {
         <div className="mt-16 pt-8 border-t border-neutral-200 dark:border-white/5 flex items-center justify-between">
           <div className="flex items-center gap-2 text-neutral-400 dark:text-neutral-600">
             <Info size={14} />
-            <span className="text-[10px] font-medium uppercase tracking-wider">RCBROWSING v0.1.0</span>
+            <span className="text-[10px] font-medium uppercase tracking-wider">RC BROWSER v{appVersion}</span>
           </div>
           <div className="text-[10px] text-neutral-400 dark:text-neutral-700">
-            Build 2026.05.10
+            Build {__BUILD_DATE__}
           </div>
         </div>
       </div>

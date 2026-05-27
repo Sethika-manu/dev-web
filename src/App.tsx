@@ -178,7 +178,7 @@ export default function App() {
           // --- PC UPDATER ---
           const update = await check();
           if (update && update.available) {
-            const isAutoUpdate = localStorage.getItem('rcbrowsing_autoupdate') === 'true';
+            const isAutoUpdate = localStorage.getItem('rcbrowser_autoupdate') === 'true';
             if (isAutoUpdate) {
               await update.downloadAndInstall();
               await relaunch();

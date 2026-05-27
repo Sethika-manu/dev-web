@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "RCBROWSING",
+        "title": "RC Browser",
         "width": 1200,
         "height": 800,
         "resizable": true,
