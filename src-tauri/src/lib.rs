@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::net::{SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Emitter}; // FIX: Added Emitter
 
 #[cfg(desktop)]
 use tauri::{PhysicalPosition, PhysicalSize, WebviewBuilder};
@@ -60,7 +60,47 @@ async fn open_webview(
             return Ok(());
         }
 
-        let webview_builder = WebviewBuilder::new(&label, tauri::WebviewUrl::External(url_data));
+        let mut webview_builder = WebviewBuilder::new(&label, tauri::WebviewUrl::External(url_data));
+
+        // Download Interceptor
+        webview_builder = webview_builder.on_download(move |webview, event| {
+            match event {
+                tauri::webview::DownloadEvent::Requested { url, destination } => {
+                    let payload = serde_json::json!({
+                        "url": url.as_str(),
+                        "state": "started",
+                        "path": destination.to_string_lossy().to_string(),
+                    });
+                    let _ = webview.app_handle().emit("download-event", payload);
+                }
+                tauri::webview::DownloadEvent::Finished { url, path, success } => {
+                    // FIX: Removed '*' from success
+                    let state = if success { "finished" } else { "failed" };
+                    let path_str = path.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+                    
+                    let payload = serde_json::json!({
+                        "url": url.as_str(),
+                        "state": state,
+                        "path": path_str.clone(),
+                    });
+                    let _ = webview.app_handle().emit("download-event", payload);
+                    
+                    if success {
+                        // FIX: Changed get_window to get_webview for evaluating JS
+                        if let Some(main_webview) = webview.app_handle().get_webview("main").or_else(|| webview.app_handle().get_webview("main_window")) {
+                            let js = format!(
+                                "window.dispatchEvent(new CustomEvent('rc-download-finished', {{ detail: {{ id: Date.now().toString(), url: '{}', path: '{}', timestamp: Date.now(), status: 'completed' }} }}))",
+                                url.as_str().replace("'", "\\'"),
+                                path_str.replace("\\", "\\\\").replace("'", "\\'")
+                            );
+                            let _ = main_webview.eval(&js);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            true
+        });
 
         main_window
             .add_child(
@@ -313,7 +353,10 @@ pub fn run() {
         .setup(|app| {
             use tauri::Listener;
             
+            // FIX: Moved `handle` inside cfg(mobile) to fix unused variable warning
+            #[cfg(mobile)]
             let handle = app.handle().clone();
+            
             app.listen("load_native_url", move |event| {
                 #[cfg(mobile)]
                 {

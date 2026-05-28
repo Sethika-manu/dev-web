@@ -28,13 +28,36 @@ import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
-import { open } from "@tauri-apps/plugin-shell"; // Add this import
+import { open } from "@tauri-apps/plugin-shell"; 
+import { listen } from "@tauri-apps/api/event";
 
 interface Session {
   id: string;
   title: string;
   url: string;
 }
+
+// Helper function to extract exact filename from path or url
+const getFileName = (path: string, url: string) => {
+  if (path && path.trim() !== '') {
+    const parts = path.split(/[/\\]/);
+    const name = parts[parts.length - 1];
+    if (name) return name;
+  }
+  if (url && url.trim() !== '') {
+    try {
+      const urlObj = new URL(url);
+      const parts = urlObj.pathname.split('/');
+      const name = parts[parts.length - 1];
+      if (name) return name;
+    } catch(e) {
+      const parts = url.split('/');
+      const name = parts[parts.length - 1];
+      if (name) return name;
+    }
+  }
+  return 'Unknown File';
+};
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>(() => {
@@ -64,13 +87,17 @@ export default function App() {
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [appView, setAppView] = useState<'browser' | 'settings' | 'console' | 'downloads' | 'tabs'>('browser');
   
-  const [isDownloading, setIsDownloading] = useState(false);
   const [toastMessage, setToastMessage] = useState<{title: string, desc: string} | null>(null);
   const [progressStates, setProgressStates] = useState<Record<string, number>>({});
   const [isUpdating, setIsUpdating] = useState(false);
   
-  // NEW STATE: Fallback URL එක Popup එකේ පෙන්නන්න
   const [fallbackUpdateUrl, setFallbackUpdateUrl] = useState<string | null>(null);
+
+  const [activeDownloads, setActiveDownloads] = useState<any[]>([]);
+  const [downloadHistory, setDownloadHistory] = useState<any[]>(() => {
+    const saved = localStorage.getItem('rc_download_history');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
 
@@ -91,6 +118,47 @@ export default function App() {
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  // DOWNLOAD EVENT LISTENER (Always Active)
+  useEffect(() => {
+    const unlistenPromise = listen('download-event', (event: any) => {
+      const payload = event.payload;
+      const fileName = getFileName(payload.path, payload.url);
+
+      if (payload.state === 'started') {
+        setActiveDownloads(prev => {
+          if (!prev.find(d => d.url === payload.url)) {
+            return [...prev, payload];
+          }
+          return prev;
+        });
+        setToastMessage({ title: 'Download Started', desc: `Downloading ${fileName}...` });
+      } else if (payload.state === 'finished' || payload.state === 'failed') {
+        setActiveDownloads(prev => prev.filter(d => d.url !== payload.url));
+      }
+    });
+
+    const handleHistoryUpdate = (e: any) => {
+      const fileName = getFileName(e.detail.path, e.detail.url);
+      setDownloadHistory(prev => {
+        const newHistory = [e.detail, ...prev];
+        localStorage.setItem('rc_download_history', JSON.stringify(newHistory));
+        return newHistory;
+      });
+      if (e.detail.status === 'completed') {
+         setToastMessage({ title: 'Download Complete', desc: `${fileName} saved successfully!` });
+      } else {
+         setToastMessage({ title: 'Download Failed', desc: `Could not save ${fileName}` });
+      }
+    };
+
+    window.addEventListener('rc-download-finished', handleHistoryUpdate);
+
+    return () => {
+      unlistenPromise.then(unlisten => unlisten());
+      window.removeEventListener('rc-download-finished', handleHistoryUpdate);
+    };
+  }, []);
 
   useEffect(() => {
     if (isMobile) {
@@ -160,9 +228,7 @@ export default function App() {
         };
 
         if (isMobileDevice) {
-          // --- MOBILE CUSTOM UPDATER ---
           const currentVer = await getVersion();
-          
           const response = await fetch("https://raw.githubusercontent.com/Sethika-manu/dev-web/refs/heads/main/update.json");
           const updateData = await response.json();
           
@@ -184,18 +250,37 @@ export default function App() {
                 setToastMessage({ title: 'Opening Download...', desc: 'Please check your browser to download the APK.' });
                 
                 try {
-                  // 1. මුලින්ම Tauri Shell එකෙන් Try කරනවා
                   await open(apkUrl);
                 } catch (err) {
-                  console.error("Shell open failed, showing fallback UI:", err);
-                  // 2. ඒක Fail වුණොත්, අපේ ලස්සන Custom React Modal එක Open කරනවා
-                  setFallbackUpdateUrl(apkUrl);
+                  console.error("Shell open failed, using fallback:", err);
+                  try {
+                    if (navigator?.clipboard?.writeText) {
+                      await navigator.clipboard.writeText(apkUrl);
+                    } else {
+                      throw new Error("Clipboard API not available");
+                    }
+                  } catch (clipErr) {
+                    const textArea = document.createElement("textarea");
+                    textArea.value = apkUrl;
+                    textArea.style.position = "fixed";
+                    textArea.style.left = "-999999px";
+                    textArea.style.top = "-999999px";
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    try {
+                      document.execCommand('copy');
+                    } catch (err) {
+                      console.error('Fallback copy failed', err);
+                    }
+                    document.body.removeChild(textArea);
+                  }
+                  alert("Auto-download was blocked by your device.\n\nThe update link has been copied to your clipboard. Please open Chrome or your default browser, paste the link, and download the update.");
                 }
               }
             }
           }
         } else {
-          // --- PC UPDATER ---
           const update = await check();
           if (update && update.available) {
             const isAutoUpdate = localStorage.getItem('rcbrowser_autoupdate') === 'true';
@@ -342,6 +427,14 @@ export default function App() {
     }
   };
 
+  // Auto-hide toast logic
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => setToastMessage(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
   return (
     <motion.div 
       key="app"
@@ -352,7 +445,7 @@ export default function App() {
     >
       <div 
         id="top-bar-container"
-        className="w-full bg-gray-900 dark:bg-gray-900 border-b border-white/5 flex-shrink-0 relative"
+        className="w-full bg-gray-900 dark:bg-gray-900 border-b border-white/5 flex-shrink-0 relative flex flex-col"
         style={{
           paddingTop: "env(safe-area-inset-top, 0px)"
         }}
@@ -363,6 +456,25 @@ export default function App() {
           onSearchChange={setSearchValue}
           activeSessionId={activeSessionId}
         />
+        
+        {/* NEW IN-FLOW NOTIFICATION BANNER */}
+        <AnimatePresence>
+          {toastMessage && (
+            <motion.div 
+              initial={{ height: 0, opacity: 0 }} 
+              animate={{ height: 'auto', opacity: 1 }} 
+              exit={{ height: 0, opacity: 0 }} 
+              transition={{ duration: 0.3 }}
+              className="w-full bg-accent/20 border-b border-accent/30 overflow-hidden flex items-center justify-center z-50"
+            >
+              <div className="py-1.5 px-4 flex items-center gap-2 text-xs font-semibold text-accent dark:text-accent drop-shadow-sm truncate">
+                <Download size={14} className="animate-bounce flex-shrink-0" />
+                <span className="truncate">{toastMessage.title} - {toastMessage.desc}</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-transparent overflow-hidden z-50">
           <AnimatePresence>
             {(activeSessionId && (progressStates[activeSessionId] || 0) > 0) && (
@@ -392,7 +504,7 @@ export default function App() {
             onConsoleClick={() => handleNavClick('console')}
             onDownloadsClick={() => handleNavClick('downloads')}
             activeView={appView}
-            isDownloading={isDownloading}
+            isDownloading={activeDownloads.length > 0} 
           />
         </div>
         
@@ -407,7 +519,15 @@ export default function App() {
             {(() => {
               if (appView === 'settings') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Settings /></div>;
               if (appView === 'console') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Console /></div>;
-              if (appView === 'downloads') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Downloads /></div>;
+              if (appView === 'downloads') return (
+                <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto">
+                  <Downloads 
+                    activeDownloads={activeDownloads} 
+                    history={downloadHistory} 
+                    clearHistory={() => { setDownloadHistory([]); localStorage.removeItem('rc_download_history'); }} 
+                  />
+                </div>
+              );
               if (appView === 'browser') {
                 const isHomeVisible = !activeSessionId || (activeSession && (activeSession.url === "" || activeSession.url === "about:blank"));
                 if (isHomeVisible) return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Home onNavigate={handleNavigate} /></div>;
@@ -453,19 +573,6 @@ export default function App() {
         </main>
       </div>
 
-      <AnimatePresence>
-        {toastMessage && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="absolute bottom-24 md:bottom-16 right-4 z-[999] bg-white dark:bg-[#1a1a1a] border border-neutral-200 dark:border-white/10 shadow-lg rounded-xl p-4 flex items-center gap-4">
-            <div className="p-2 bg-accent/10 text-accent rounded-lg"><Download size={16} /></div>
-            <div>
-              <div className="text-sm font-semibold text-neutral-900 dark:text-white">{toastMessage.title}</div>
-              <div className="text-xs text-neutral-500 max-w-[200px] truncate">{toastMessage.desc}</div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* NEW FALLBACK MODAL FOR AUTO-DOWNLOAD FAILURES */}
       <AnimatePresence>
         {fallbackUpdateUrl && (
           <motion.div 

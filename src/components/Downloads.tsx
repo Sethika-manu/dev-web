@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
-import { listen } from '@tauri-apps/api/event';
 import { Download, CheckCircle, XCircle, Clock, Trash2, HardDrive } from 'lucide-react';
 
 interface DownloadPayload {
@@ -17,47 +16,35 @@ interface DownloadHistoryItem {
   status: 'completed' | 'failed';
 }
 
-export const Downloads = () => {
-  const [activeDownloads, setActiveDownloads] = useState<DownloadPayload[]>([]);
-  const [history, setHistory] = useState<DownloadHistoryItem[]>(() => {
-    const saved = localStorage.getItem('rc_download_history');
-    return saved ? JSON.parse(saved) : [];
-  });
+interface DownloadsProps {
+  activeDownloads: DownloadPayload[];
+  history: DownloadHistoryItem[];
+  clearHistory: () => void;
+}
 
-  useEffect(() => {
-    const unlisten = listen<DownloadPayload>('download-event', (event) => {
-      const payload = event.payload;
+// Helper function to extract exact filename
+const getFileName = (path: string, url: string) => {
+  if (path && path.trim() !== '') {
+    const parts = path.split(/[/\\]/);
+    const name = parts[parts.length - 1];
+    if (name) return name;
+  }
+  if (url && url.trim() !== '') {
+    try {
+      const urlObj = new URL(url);
+      const parts = urlObj.pathname.split('/');
+      const name = parts[parts.length - 1];
+      if (name) return name;
+    } catch(e) {
+      const parts = url.split('/');
+      const name = parts[parts.length - 1];
+      if (name) return name;
+    }
+  }
+  return 'Unknown File';
+};
 
-      if (payload.state === 'started') {
-        setActiveDownloads(prev => {
-          if (!prev.find(d => d.url === payload.url)) {
-            return [...prev, payload];
-          }
-          return prev;
-        });
-      } else if (payload.state === 'finished' || payload.state === 'failed') {
-        // Remove from active
-        setActiveDownloads(prev => prev.filter(d => d.url !== payload.url));
-      }
-    });
-
-    const handleHistoryUpdate = (e: any) => {
-      setHistory(prev => [e.detail, ...prev]);
-    };
-
-    window.addEventListener('rc-download-finished', handleHistoryUpdate);
-
-    return () => {
-      unlisten.then(fn => fn());
-      window.removeEventListener('rc-download-finished', handleHistoryUpdate);
-    };
-  }, []);
-
-  const clearHistory = () => {
-    setHistory([]);
-    localStorage.removeItem('rc_download_history');
-  };
-
+export const Downloads: React.FC<DownloadsProps> = ({ activeDownloads, history, clearHistory }) => {
   return (
     <div className="h-full bg-white dark:bg-[#050505] overflow-y-auto custom-scrollbar transition-colors duration-300">
       <div className="max-w-3xl mx-auto py-12 px-8">
@@ -101,8 +88,8 @@ export const Downloads = () => {
                       <HardDrive size={18} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-neutral-900 dark:text-white truncate">
-                        {download.url.split('/').pop() || 'Unknown file'}
+                      <div className="text-sm font-medium text-neutral-900 dark:text-white truncate" title={getFileName(download.path, download.url)}>
+                        {getFileName(download.path, download.url)}
                       </div>
                       <div className="text-xs text-accent mt-1 flex items-center gap-1.5">
                         <Clock size={12} className="animate-spin-slow" />
@@ -143,8 +130,8 @@ export const Downloads = () => {
                       {item.status === 'completed' ? <CheckCircle size={18} /> : <XCircle size={18} />}
                     </div>
                     <div className="flex-1 min-w-0 pr-4">
-                      <div className="text-sm font-medium text-neutral-800 dark:text-neutral-200 truncate">
-                        {item.url.split('/').pop() || 'Unknown file'}
+                      <div className="text-sm font-medium text-neutral-800 dark:text-neutral-200 truncate" title={getFileName(item.path, item.url)}>
+                        {getFileName(item.path, item.url)}
                       </div>
                       <div className="text-xs text-neutral-500 dark:text-neutral-500 truncate mt-0.5" title={item.path}>
                         {item.path || item.url}
