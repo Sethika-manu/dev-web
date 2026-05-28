@@ -19,7 +19,10 @@ import {
   Home as HomeIcon, 
   Terminal, 
   Settings as SettingsIcon,
-  Layers 
+  Layers,
+  Copy,
+  ExternalLink,
+  Image as ImageIcon
 } from "lucide-react";
 
 import { logEvent } from "firebase/analytics";
@@ -30,6 +33,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-shell"; 
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core"; // අලුතින් Import කරා!
 
 interface Session {
   id: string;
@@ -37,7 +41,6 @@ interface Session {
   url: string;
 }
 
-// Helper function to extract exact filename from path or url
 const getFileName = (path: string, url: string) => {
   if (path && path.trim() !== '') {
     const parts = path.split(/[/\\]/);
@@ -92,6 +95,8 @@ export default function App() {
   const [isUpdating, setIsUpdating] = useState(false);
   
   const [fallbackUpdateUrl, setFallbackUpdateUrl] = useState<string | null>(null);
+  
+  const [contextMenuData, setContextMenuData] = useState<{type: 'link' | 'image', url: string} | null>(null);
 
   const [activeDownloads, setActiveDownloads] = useState<any[]>([]);
   const [downloadHistory, setDownloadHistory] = useState<any[]>(() => {
@@ -119,8 +124,11 @@ export default function App() {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
 
-  // DOWNLOAD EVENT LISTENER (Always Active)
   useEffect(() => {
+    const unlistenContextPromise = listen('show-context-menu', (event: any) => {
+      setContextMenuData(event.payload);
+    });
+
     const unlistenPromise = listen('download-event', (event: any) => {
       const payload = event.payload;
       const fileName = getFileName(payload.path, payload.url);
@@ -156,6 +164,7 @@ export default function App() {
 
     return () => {
       unlistenPromise.then(unlisten => unlisten());
+      unlistenContextPromise.then(unlisten => unlisten());
       window.removeEventListener('rc-download-finished', handleHistoryUpdate);
     };
   }, []);
@@ -202,14 +211,6 @@ export default function App() {
   }, [activeSessionId, isMobile]);
 
   useEffect(() => {
-    try {
-      if (analytics) {
-        logEvent(analytics, 'app_open');
-      }
-    } catch (e) {
-      console.warn("Analytics not configured yet");
-    }
-
     const checkForUpdates = async () => {
       try {
         const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -238,41 +239,24 @@ export default function App() {
             if (apkUrl) {
               const wantsUpdate = await ask(
                 `A new mobile version v${updateData.version} is ready to install.\n\nUpdate now to get the latest features and security patches.`,
-                {
-                  title: 'Update Available',
-                  kind: 'info',
-                  okLabel: 'Update Now',
-                  cancelLabel: 'Ignore'
-                }
+                { title: 'Update Available', kind: 'info', okLabel: 'Update Now', cancelLabel: 'Ignore' }
               );
 
               if (wantsUpdate) {
                 setToastMessage({ title: 'Opening Download...', desc: 'Please check your browser to download the APK.' });
-                
                 try {
                   await open(apkUrl);
                 } catch (err) {
-                  console.error("Shell open failed, using fallback:", err);
                   try {
                     if (navigator?.clipboard?.writeText) {
                       await navigator.clipboard.writeText(apkUrl);
-                    } else {
-                      throw new Error("Clipboard API not available");
-                    }
+                    } else throw new Error("Clipboard API not available");
                   } catch (clipErr) {
                     const textArea = document.createElement("textarea");
                     textArea.value = apkUrl;
-                    textArea.style.position = "fixed";
-                    textArea.style.left = "-999999px";
-                    textArea.style.top = "-999999px";
-                    document.body.appendChild(textArea);
-                    textArea.focus();
-                    textArea.select();
-                    try {
-                      document.execCommand('copy');
-                    } catch (err) {
-                      console.error('Fallback copy failed', err);
-                    }
+                    textArea.style.position = "fixed"; document.body.appendChild(textArea);
+                    textArea.focus(); textArea.select();
+                    try { document.execCommand('copy'); } catch (err) {}
                     document.body.removeChild(textArea);
                   }
                   alert("Auto-download was blocked by your device.\n\nThe update link has been copied to your clipboard. Please open Chrome or your default browser, paste the link, and download the update.");
@@ -290,12 +274,7 @@ export default function App() {
             } else {
               const wantsUpdate = await ask(
                 `A new version v${update.version} is ready to install.\n\nUpdate now to get the latest features and security patches.`,
-                {
-                  title: 'Update Available',
-                  kind: 'info',
-                  okLabel: 'Update Now',
-                  cancelLabel: 'Ignore'
-                }
+                { title: 'Update Available', kind: 'info', okLabel: 'Update Now', cancelLabel: 'Ignore' }
               );
 
               if (wantsUpdate) {
@@ -305,16 +284,13 @@ export default function App() {
                   await update.downloadAndInstall();
                   await relaunch();
                 } catch (e) {
-                  console.error("Failed to download update:", e);
                   setIsUpdating(false);
                 }
               }
             }
           }
         }
-      } catch (error) {
-        console.error("Failed to check for updates:", error);
-      }
+      } catch (error) {}
     };
     
     checkForUpdates();
@@ -427,7 +403,6 @@ export default function App() {
     }
   };
 
-  // Auto-hide toast logic
   useEffect(() => {
     if (toastMessage) {
       const timer = setTimeout(() => setToastMessage(null), 4000);
@@ -446,9 +421,7 @@ export default function App() {
       <div 
         id="top-bar-container"
         className="w-full bg-gray-900 dark:bg-gray-900 border-b border-white/5 flex-shrink-0 relative flex flex-col"
-        style={{
-          paddingTop: "env(safe-area-inset-top, 0px)"
-        }}
+        style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
         <TitleBar 
           onNavigate={handleNavigate} 
@@ -457,7 +430,6 @@ export default function App() {
           activeSessionId={activeSessionId}
         />
         
-        {/* NEW IN-FLOW NOTIFICATION BANNER */}
         <AnimatePresence>
           {toastMessage && (
             <motion.div 
@@ -508,9 +480,7 @@ export default function App() {
           />
         </div>
         
-        <main 
-          className="flex-1 relative overflow-hidden bg-transparent z-0 transition-colors duration-200"
-        >
+        <main className="flex-1 relative overflow-hidden bg-transparent z-0 transition-colors duration-200">
           <div className={`absolute inset-0 z-0 ${appView === 'browser' ? 'visible' : 'invisible pointer-events-none'}`}>
             <Viewport sessions={sessions} activeSessionId={activeSessionId} isPaletteOpen={isPaletteOpen} appView={appView} />
           </div>
@@ -521,11 +491,7 @@ export default function App() {
               if (appView === 'console') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Console /></div>;
               if (appView === 'downloads') return (
                 <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto">
-                  <Downloads 
-                    activeDownloads={activeDownloads} 
-                    history={downloadHistory} 
-                    clearHistory={() => { setDownloadHistory([]); localStorage.removeItem('rc_download_history'); }} 
-                  />
+                  <Downloads activeDownloads={activeDownloads} history={downloadHistory} clearHistory={() => { setDownloadHistory([]); localStorage.removeItem('rc_download_history'); }} />
                 </div>
               );
               if (appView === 'browser') {
@@ -547,11 +513,7 @@ export default function App() {
                     ) : (
                       <div className="grid grid-cols-2 gap-4 pointer-events-auto">
                         {sessions.map(session => (
-                          <div 
-                            key={session.id} 
-                            onClick={() => { setActiveSessionId(session.id); setAppView('browser'); }}
-                            className={`relative p-4 rounded-2xl flex flex-col gap-2 cursor-pointer transition-all ${activeSessionId === session.id ? 'bg-white dark:bg-neutral-900 border-2 border-accent shadow-md' : 'bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm'} pointer-events-auto`}
-                          >
+                          <div key={session.id} onClick={() => { setActiveSessionId(session.id); setAppView('browser'); }} className={`relative p-4 rounded-2xl flex flex-col gap-2 cursor-pointer transition-all ${activeSessionId === session.id ? 'bg-white dark:bg-neutral-900 border-2 border-accent shadow-md' : 'bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm'} pointer-events-auto`}>
                             <div className="flex justify-between items-start pointer-events-auto">
                               <span className="text-sm font-semibold text-neutral-900 dark:text-white truncate pr-6 pointer-events-auto">{session.title || 'New Tab'}</span>
                               <button onClick={(e) => { e.stopPropagation(); handleCloseSession(session.id); }} className="absolute top-3 right-3 text-neutral-400 hover:text-red-500 bg-neutral-100 dark:bg-neutral-800 rounded-full p-1 shadow-sm transition-colors pointer-events-auto">
@@ -569,9 +531,92 @@ export default function App() {
               return null;
             })()}
           </div>
-          
         </main>
       </div>
+
+      {/* CUSTOM MOBILE BOTTOM SHEET MENU */}
+      <AnimatePresence>
+        {contextMenuData && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }} 
+            className="absolute inset-0 z-[999999] flex items-end justify-center bg-black/50 backdrop-blur-sm pointer-events-auto"
+            onClick={() => setContextMenuData(null)}
+          >
+            <motion.div 
+              initial={{ y: "100%" }} 
+              animate={{ y: 0 }} 
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-white dark:bg-[#121212] rounded-t-3xl p-6 w-full max-w-md shadow-2xl border-t border-neutral-200 dark:border-neutral-800 pb-12"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-12 h-1.5 bg-neutral-300 dark:bg-neutral-700 rounded-full mx-auto mb-6"></div>
+              
+              <div className="flex items-center gap-3 mb-6 bg-neutral-50 dark:bg-neutral-900 p-3 rounded-xl border border-neutral-100 dark:border-neutral-800">
+                <div className="p-2 bg-accent/10 rounded-lg text-accent flex-shrink-0">
+                  {contextMenuData.type === 'image' ? <ImageIcon size={20} /> : <ExternalLink size={20} />}
+                </div>
+                <p className="text-xs text-neutral-600 dark:text-neutral-400 truncate w-full">
+                  {contextMenuData.url}
+                </p>
+              </div>
+              
+              <div className="flex flex-col gap-3">
+                {contextMenuData.type === 'link' && (
+                  <button 
+                    onClick={() => {
+                      handleCreateSession(contextMenuData.url);
+                      setContextMenuData(null);
+                    }} 
+                    className="w-full py-3.5 rounded-xl text-sm font-semibold text-white bg-accent hover:bg-accent/90 transition-colors shadow-lg shadow-accent/20 flex items-center justify-center gap-2"
+                  >
+                    <ExternalLink size={16} /> Open in New Tab
+                  </button>
+                )}
+                
+                {contextMenuData.type === 'image' && (
+                  <button 
+                    onClick={async () => {
+                      setContextMenuData(null);
+                      setToastMessage({ title: 'Starting Download', desc: 'Preparing image...' });
+                      if (activeSessionId) {
+                        try {
+                          await invoke("trigger_download", { label: activeSessionId, url: contextMenuData.url });
+                        } catch (e) {
+                          console.error("Download failed:", e);
+                        }
+                      }
+                    }} 
+                    className="w-full py-3.5 rounded-xl text-sm font-semibold text-white bg-accent hover:bg-accent/90 transition-colors shadow-lg shadow-accent/20 flex items-center justify-center gap-2"
+                  >
+                    <Download size={16} /> Download Image
+                  </button>
+                )}
+                
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(contextMenuData.url);
+                    setToastMessage({ title: 'Copied!', desc: 'Link copied to clipboard.' });
+                    setContextMenuData(null);
+                  }} 
+                  className="w-full py-3.5 rounded-xl text-sm font-semibold text-neutral-800 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors flex items-center justify-center gap-2 border border-transparent dark:border-white/5"
+                >
+                  <Copy size={16} /> Copy {contextMenuData.type === 'image' ? 'Image ' : ''}Link
+                </button>
+                
+                <button 
+                  onClick={() => setContextMenuData(null)} 
+                  className="w-full py-3.5 rounded-xl text-sm font-bold text-red-500 hover:text-white bg-red-500/10 hover:bg-red-500 transition-colors mt-2"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {fallbackUpdateUrl && (
@@ -579,7 +624,7 @@ export default function App() {
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }} 
-            className="absolute inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 pointer-events-auto"
+            className="absolute inset-0 z-[999999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 pointer-events-auto"
           >
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }} 
@@ -625,9 +670,7 @@ export default function App() {
       <div id="bottom-bar-container" className="flex-shrink-0 w-full z-[99999] relative bg-gray-900 dark:bg-gray-900">
         <nav 
           className="md:hidden w-full h-[calc(68px+env(safe-area-inset-bottom,0px))] bg-gray-900 dark:bg-gray-900 border-t border-neutral-200 dark:border-neutral-800/80 flex items-center justify-around px-2"
-          style={{
-            paddingBottom: "env(safe-area-inset-bottom, 0px)"
-          }}
+          style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
         >
           <button onClick={handleGoHome} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
             <HomeIcon size={20} className="mb-1" /><span>Home</span>

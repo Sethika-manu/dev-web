@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::net::{SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager, Emitter}; // FIX: Added Emitter
+use tauri::{AppHandle, Manager, Emitter};
 
 #[cfg(desktop)]
 use tauri::{PhysicalPosition, PhysicalSize, WebviewBuilder};
@@ -28,9 +28,33 @@ fn get_ping() -> u64 {
     }
 }
 
+fn decode_hex(hex_str: &str) -> String {
+    let mut bytes = Vec::new();
+    let mut chars = hex_str.chars().peekable();
+    while chars.peek().is_some() {
+        let chunk: String = chars.by_ref().take(2).collect();
+        if let Ok(byte) = u8::from_str_radix(&chunk, 16) {
+            bytes.push(byte);
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+#[tauri::command]
+async fn trigger_download(app: AppHandle, label: String, url: String) -> Result<(), String> {
+    if let Some(webview) = app.get_webview(&label) {
+        let js = format!(
+            "var a = document.createElement('a'); a.href = '{}'; a.download = ''; document.body.appendChild(a); a.click(); document.body.removeChild(a);",
+            url.replace("'", "\\'")
+        );
+        let _ = webview.eval(&js);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -62,7 +86,105 @@ async fn open_webview(
 
         let mut webview_builder = WebviewBuilder::new(&label, tauri::WebviewUrl::External(url_data));
 
-        // Download Interceptor
+        // 🚨 100% CLEAN NATIVE LONG-PRESS (NO CLICK BLOCKERS) 🚨
+        webview_builder = webview_builder.initialization_script(r#"
+            (function() {
+                var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                if (!isMobile) return;
+
+                // 1. Hide Android Default Popup
+                var style = document.createElement('style');
+                style.innerHTML = 'a, img { -webkit-touch-callout: none !important; }';
+                document.head.appendChild(style);
+
+                // 2. Fix target="_blank" without blocking clicks
+                document.addEventListener('click', function(e) {
+                    try {
+                        if (e.target && typeof e.target.closest === 'function') {
+                            var link = e.target.closest('a');
+                            if (link && link.getAttribute('target') === '_blank') {
+                                link.setAttribute('target', '_self');
+                            }
+                        }
+                    } catch(err) {}
+                }, false);
+
+                // 3. The PURE Native Context Menu Handler + X-Ray Vision
+                document.addEventListener('contextmenu', function(e) {
+                    try {
+                        var x = e.clientX || 0;
+                        var y = e.clientY || 0;
+                        
+                        if (x === 0 && y === 0 && e.touches && e.touches.length > 0) {
+                            x = e.touches[0].clientX;
+                            y = e.touches[0].clientY;
+                        }
+
+                        // X-Ray: Touch කරපු තැන Elements ඔක්කොම ගන්නවා
+                        var elements = document.elementsFromPoint(x, y);
+                        var targetUrl = null;
+                        var type = 'link';
+
+                        for (var i = 0; i < elements.length; i++) {
+                            var el = elements[i];
+                            if (!el || !el.tagName) continue;
+                            
+                            var tag = el.tagName.toLowerCase();
+                            if (tag === 'img') {
+                                targetUrl = el.src || el.getAttribute('data-src') || el.getAttribute('data-original');
+                                if (targetUrl) { type = 'image'; break; }
+                            } else if (tag === 'a' && el.href) {
+                                targetUrl = el.href;
+                                type = 'link';
+                                break;
+                            }
+                        }
+
+                        if (targetUrl) {
+                            e.preventDefault(); // Stop ONLY the default Android Popup
+                            
+                            try { if (navigator.vibrate) navigator.vibrate(50); } catch(err){}
+                            
+                            var payloadStr = type + "|||" + targetUrl;
+                            var utf8 = new TextEncoder().encode(payloadStr);
+                            var hex = '';
+                            for(var j=0; j<utf8.length; j++) {
+                                hex += utf8[j].toString(16).padStart(2, '0');
+                            }
+                            
+                            // Anchor Hack එකෙන් Rust එකට යවනවා (Iframe CSP block වෙන්නෙත් නෑ, location.href Clicks හිර කරන්නෙත් නෑ)
+                            var a = document.createElement('a');
+                            a.href = "https://rc.context.menu/?data=" + hex;
+                            a.style.display = 'none';
+                            document.body.appendChild(a);
+                            a.click();
+                            setTimeout(function() { document.body.removeChild(a); }, 100);
+                        }
+                    } catch(err) {}
+                }, true); // Capture phase guarantees we catch it
+            })();
+        "#);
+
+        let app_for_nav = app.clone();
+        webview_builder = webview_builder.on_navigation(move |url| {
+            let url_str = url.as_str();
+            if url_str.starts_with("https://rc.context.menu/?data=") {
+                let hex_data = url_str.trim_start_matches("https://rc.context.menu/?data=");
+                let decoded = decode_hex(hex_data);
+                let parts: Vec<&str> = decoded.split("|||").collect();
+                
+                if parts.len() == 2 {
+                    let payload = serde_json::json!({
+                        "type": parts[0],
+                        "url": parts[1]
+                    });
+                    let _ = app_for_nav.emit("show-context-menu", payload);
+                }
+                return false; 
+            }
+            true 
+        });
+
         webview_builder = webview_builder.on_download(move |webview, event| {
             match event {
                 tauri::webview::DownloadEvent::Requested { url, destination } => {
@@ -74,7 +196,6 @@ async fn open_webview(
                     let _ = webview.app_handle().emit("download-event", payload);
                 }
                 tauri::webview::DownloadEvent::Finished { url, path, success } => {
-                    // FIX: Removed '*' from success
                     let state = if success { "finished" } else { "failed" };
                     let path_str = path.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
                     
@@ -86,7 +207,6 @@ async fn open_webview(
                     let _ = webview.app_handle().emit("download-event", payload);
                     
                     if success {
-                        // FIX: Changed get_window to get_webview for evaluating JS
                         if let Some(main_webview) = webview.app_handle().get_webview("main").or_else(|| webview.app_handle().get_webview("main_window")) {
                             let js = format!(
                                 "window.dispatchEvent(new CustomEvent('rc-download-finished', {{ detail: {{ id: Date.now().toString(), url: '{}', path: '{}', timestamp: Date.now(), status: 'completed' }} }}))",
@@ -309,7 +429,7 @@ async fn get_system_metrics(
 
         if let Some(process) = sys.process(pid) {
             let cpu = process.cpu_usage();
-            let ram = process.memory() / 1024 / 1024; // Convert bytes to MB
+            let ram = process.memory() / 1024 / 1024;
             let ping = get_ping();
 
             Ok(SystemMetrics { cpu, ram, ping })
@@ -348,12 +468,12 @@ pub fn run() {
             go_back,
             go_forward,
             reload_webview,
-            resize_browser_webview
+            resize_browser_webview,
+            trigger_download
         ])
         .setup(|app| {
             use tauri::Listener;
             
-            // FIX: Moved `handle` inside cfg(mobile) to fix unused variable warning
             #[cfg(mobile)]
             let handle = app.handle().clone();
             
