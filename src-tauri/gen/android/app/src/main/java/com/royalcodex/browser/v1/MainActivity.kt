@@ -13,18 +13,20 @@ import android.webkit.WebViewClient
 import android.webkit.WebChromeClient
 import android.widget.FrameLayout
 import android.graphics.Color
+import android.os.Vibrator
+import android.os.VibrationEffect
+import android.content.Context
 import java.net.URLEncoder
 
 class MainActivity : TauriActivity() {
     private var tauriWebView: WebView? = null
     var nativeWebView: WebView? = null
 
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     override fun onWebViewCreate(webView: WebView) {
         super.onWebViewCreate(webView)
         tauriWebView = webView
 
-        // Singleton WebView Configuration
         if (nativeWebView == null) {
             val rootView = findViewById<FrameLayout>(android.R.id.content)
 
@@ -53,13 +55,51 @@ class MainActivity : TauriActivity() {
                         url?.let { syncUrlToReact(it) }
                     }
                 }
+
+                // 🚨 NATIVE OS-LEVEL LONG PRESS DETECTOR 🚨
+                setOnLongClickListener {
+                    val result = hitTestResult
+                    val url = result.extra
+                    val type = result.type
+
+                    if (url != null) {
+                        var payloadType = ""
+                        
+                        if (type == WebView.HitTestResult.IMAGE_TYPE || type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
+                            payloadType = "image"
+                        } else if (type == WebView.HitTestResult.SRC_ANCHOR_TYPE) {
+                            payloadType = "link"
+                        }
+
+                        if (payloadType.isNotEmpty()) {
+                            try {
+                                val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                    vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    vibrator.vibrate(50)
+                                }
+                            } catch (e: Exception) {}
+
+                            val escapedUrl = url.replace("'", "\\'").replace("\"", "\\\"")
+                            tauriWebView?.post {
+                                // 🚨 REACT WEBVIEW එක උඩට ගන්නවා POPUP එක පෙන්නන්න 🚨
+                                tauriWebView?.bringToFront()
+                                
+                                val js = "window.dispatchEvent(new CustomEvent('rc-native-context-menu', { detail: { type: '$payloadType', url: '$escapedUrl' } }));"
+                                tauriWebView?.evaluateJavascript(js, null)
+                            }
+                            
+                            return@setOnLongClickListener true 
+                        }
+                    }
+                    false 
+                }
             }
 
-            // Tauri එක උගේ UI එක හදලා ඉවර වුණාට පස්සේ අපි අපේ එක ඔබනවා (post)
             rootView.post {
                 val density = resources.displayMetrics.density
-                
-                // React UI එකේ උඩ Bar එකටයි යට Bar එකටයි ඉඩ තියනවා (85dp ගානේ)
                 val topMarginPx = (100 * density).toInt() 
                 val bottomMarginPx = (110 * density).toInt()
 
@@ -77,8 +117,9 @@ class MainActivity : TauriActivity() {
             nativeWebView?.setBackgroundColor(Color.WHITE)
         }
 
-        webView.addJavascriptInterface(AndroidBridge(nativeWebView), "NativeBridge")
-        webView.addJavascriptInterface(AndroidBridge(nativeWebView), "AndroidBridge")
+        val bridge = AndroidBridge(nativeWebView)
+        webView.addJavascriptInterface(bridge, "NativeBridge")
+        webView.addJavascriptInterface(bridge, "AndroidBridge")
     }
 
     private fun syncUrlToReact(url: String) {
@@ -94,6 +135,14 @@ class MainActivity : TauriActivity() {
 
 class AndroidBridge(private val nativeWebView: WebView?) {
     
+    // 🚨 React එකෙන් Menu එක Close කරාම ආපහු Google එක උඩට ගන්න Function එක 🚨
+    @JavascriptInterface
+    fun hideContextMenu() {
+        Handler(Looper.getMainLooper()).post {
+            nativeWebView?.bringToFront()
+        }
+    }
+
     @JavascriptInterface
     fun loadNativeUrl(url: String) {
         Handler(Looper.getMainLooper()).post {
@@ -103,7 +152,6 @@ class AndroidBridge(private val nativeWebView: WebView?) {
                 nativeWebView?.visibility = View.GONE
                 nativeWebView?.loadUrl("about:blank")
             } else {
-                // සයිට් එකක් ආවම පේන්න දාලා, බලෙන්ම ලේයර්ස් වලින් උඩටම ගන්නවා!
                 nativeWebView?.visibility = View.VISIBLE
                 nativeWebView?.bringToFront() 
                 

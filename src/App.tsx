@@ -15,7 +15,6 @@ import { Downloads } from "./components/Downloads";
 // Lucide Icons
 import { 
   Download, 
-  RefreshCw, 
   Home as HomeIcon, 
   Terminal, 
   Settings as SettingsIcon,
@@ -33,7 +32,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-shell"; 
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core"; // අලුතින් Import කරා!
+import { invoke } from "@tauri-apps/api/core";
 
 interface Session {
   id: string;
@@ -95,7 +94,7 @@ export default function App() {
   const [isUpdating, setIsUpdating] = useState(false);
   
   const [fallbackUpdateUrl, setFallbackUpdateUrl] = useState<string | null>(null);
-  
+
   const [contextMenuData, setContextMenuData] = useState<{type: 'link' | 'image', url: string} | null>(null);
 
   const [activeDownloads, setActiveDownloads] = useState<any[]>([]);
@@ -125,9 +124,10 @@ export default function App() {
   }, [activeSessionId]);
 
   useEffect(() => {
-    const unlistenContextPromise = listen('show-context-menu', (event: any) => {
-      setContextMenuData(event.payload);
-    });
+    const handleNativeContextMenu = (e: any) => {
+      setContextMenuData(e.detail);
+    };
+    window.addEventListener('rc-native-context-menu', handleNativeContextMenu);
 
     const unlistenPromise = listen('download-event', (event: any) => {
       const payload = event.payload;
@@ -163,8 +163,8 @@ export default function App() {
     window.addEventListener('rc-download-finished', handleHistoryUpdate);
 
     return () => {
+      window.removeEventListener('rc-native-context-menu', handleNativeContextMenu);
       unlistenPromise.then(unlisten => unlisten());
-      unlistenContextPromise.then(unlisten => unlisten());
       window.removeEventListener('rc-download-finished', handleHistoryUpdate);
     };
   }, []);
@@ -403,12 +403,18 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    if (toastMessage) {
-      const timer = setTimeout(() => setToastMessage(null), 4000);
-      return () => clearTimeout(timer);
+  // 🚨 POPUP එක වහනකොට ආපහු Native WebView එක උඩට ගන්න Function එක 🚨
+  const closeContextMenu = () => {
+    setContextMenuData(null);
+    if (isMobile) {
+      const win = window as any;
+      if (win.NativeBridge) {
+        win.NativeBridge.hideContextMenu();
+      } else if (win.AndroidBridge) {
+        win.AndroidBridge.hideContextMenu();
+      }
     }
-  }, [toastMessage]);
+  };
 
   return (
     <motion.div 
@@ -534,31 +540,29 @@ export default function App() {
         </main>
       </div>
 
-      {/* CUSTOM MOBILE BOTTOM SHEET MENU */}
+      {/* 🚨 CUSTOM CENTERED POPUP MENU (Close Event එකත් එක්ක) 🚨 */}
       <AnimatePresence>
         {contextMenuData && (
           <motion.div 
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }} 
-            className="absolute inset-0 z-[999999] flex items-end justify-center bg-black/50 backdrop-blur-sm pointer-events-auto"
-            onClick={() => setContextMenuData(null)}
+            className="absolute inset-0 z-[999999] flex items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-auto p-4"
+            onClick={closeContextMenu} // 👈 මෙතන closeContextMenu දැම්මා
           >
             <motion.div 
-              initial={{ y: "100%" }} 
-              animate={{ y: 0 }} 
-              exit={{ y: "100%" }}
+              initial={{ scale: 0.9, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.9, opacity: 0 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-white dark:bg-[#121212] rounded-t-3xl p-6 w-full max-w-md shadow-2xl border-t border-neutral-200 dark:border-neutral-800 pb-12"
+              className="bg-white dark:bg-[#121212] rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-neutral-200 dark:border-neutral-800"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="w-12 h-1.5 bg-neutral-300 dark:bg-neutral-700 rounded-full mx-auto mb-6"></div>
-              
               <div className="flex items-center gap-3 mb-6 bg-neutral-50 dark:bg-neutral-900 p-3 rounded-xl border border-neutral-100 dark:border-neutral-800">
                 <div className="p-2 bg-accent/10 rounded-lg text-accent flex-shrink-0">
                   {contextMenuData.type === 'image' ? <ImageIcon size={20} /> : <ExternalLink size={20} />}
                 </div>
-                <p className="text-xs text-neutral-600 dark:text-neutral-400 truncate w-full">
+                <p className="text-xs text-neutral-600 dark:text-neutral-400 w-full break-all line-clamp-3">
                   {contextMenuData.url}
                 </p>
               </div>
@@ -568,7 +572,7 @@ export default function App() {
                   <button 
                     onClick={() => {
                       handleCreateSession(contextMenuData.url);
-                      setContextMenuData(null);
+                      closeContextMenu(); // 👈 මෙතන closeContextMenu දැම්මා
                     }} 
                     className="w-full py-3.5 rounded-xl text-sm font-semibold text-white bg-accent hover:bg-accent/90 transition-colors shadow-lg shadow-accent/20 flex items-center justify-center gap-2"
                   >
@@ -579,7 +583,7 @@ export default function App() {
                 {contextMenuData.type === 'image' && (
                   <button 
                     onClick={async () => {
-                      setContextMenuData(null);
+                      closeContextMenu(); // 👈 මෙතන closeContextMenu දැම්මා
                       setToastMessage({ title: 'Starting Download', desc: 'Preparing image...' });
                       if (activeSessionId) {
                         try {
@@ -599,7 +603,7 @@ export default function App() {
                   onClick={() => {
                     navigator.clipboard.writeText(contextMenuData.url);
                     setToastMessage({ title: 'Copied!', desc: 'Link copied to clipboard.' });
-                    setContextMenuData(null);
+                    closeContextMenu(); // 👈 මෙතන closeContextMenu දැම්මා
                   }} 
                   className="w-full py-3.5 rounded-xl text-sm font-semibold text-neutral-800 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors flex items-center justify-center gap-2 border border-transparent dark:border-white/5"
                 >
@@ -607,7 +611,7 @@ export default function App() {
                 </button>
                 
                 <button 
-                  onClick={() => setContextMenuData(null)} 
+                  onClick={closeContextMenu} // 👈 මෙතන closeContextMenu දැම්මා
                   className="w-full py-3.5 rounded-xl text-sm font-bold text-red-500 hover:text-white bg-red-500/10 hover:bg-red-500 transition-colors mt-2"
                 >
                   Cancel

@@ -28,6 +28,7 @@ fn get_ping() -> u64 {
     }
 }
 
+// Hex Decoder
 fn decode_hex(hex_str: &str) -> String {
     let mut bytes = Vec::new();
     let mut chars = hex_str.chars().peekable();
@@ -86,18 +87,13 @@ async fn open_webview(
 
         let mut webview_builder = WebviewBuilder::new(&label, tauri::WebviewUrl::External(url_data));
 
-        // 🚨 100% CLEAN NATIVE LONG-PRESS (NO CLICK BLOCKERS) 🚨
+        // 🚨 100% RELIABLE DOUBLE-TAP HACK 🚨
         webview_builder = webview_builder.initialization_script(r#"
             (function() {
                 var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
                 if (!isMobile) return;
 
-                // 1. Hide Android Default Popup
-                var style = document.createElement('style');
-                style.innerHTML = 'a, img { -webkit-touch-callout: none !important; }';
-                document.head.appendChild(style);
-
-                // 2. Fix target="_blank" without blocking clicks
+                // _blank Clicks Fix
                 document.addEventListener('click', function(e) {
                     try {
                         if (e.target && typeof e.target.closest === 'function') {
@@ -109,21 +105,29 @@ async fn open_webview(
                     } catch(err) {}
                 }, false);
 
-                // 3. The PURE Native Context Menu Handler + X-Ray Vision
-                document.addEventListener('contextmenu', function(e) {
-                    try {
-                        var x = e.clientX || 0;
-                        var y = e.clientY || 0;
-                        
-                        if (x === 0 && y === 0 && e.touches && e.touches.length > 0) {
-                            x = e.touches[0].clientX;
-                            y = e.touches[0].clientY;
-                        }
+                // Android System Callouts Hide කරනවා
+                var style = document.createElement('style');
+                style.innerHTML = 'a, img { -webkit-touch-callout: none !important; -webkit-tap-highlight-color: transparent !important; }';
+                document.head.appendChild(style);
 
-                        // X-Ray: Touch කරපු තැන Elements ඔක්කොම ගන්නවා
+                var lastTapTime = 0;
+
+                // 🚨 Double Tap Detector (Loose Strictness for higher accuracy) 🚨
+                document.addEventListener('touchend', function(e) {
+                    var currentTime = new Date().getTime();
+                    var tapLength = currentTime - lastTapTime;
+                    
+                    // තත්පර බාගයක් (500ms) ඇතුලත දෙවෙනි Tap එක වැදුනොත්
+                    if (tapLength > 0 && tapLength < 500) {
+                        var touch = e.changedTouches ? e.changedTouches[0] : null;
+                        var x = touch ? touch.clientX : (e.clientX || 0);
+                        var y = touch ? touch.clientY : (e.clientY || 0);
+
+                        if (x === 0 && y === 0) return;
+
+                        // X-Ray Scanner: Google Invisible Overlays විනිවිද යන්න
                         var elements = document.elementsFromPoint(x, y);
                         var targetUrl = null;
-                        var type = 'link';
 
                         for (var i = 0; i < elements.length; i++) {
                             var el = elements[i];
@@ -132,42 +136,38 @@ async fn open_webview(
                             var tag = el.tagName.toLowerCase();
                             if (tag === 'img') {
                                 targetUrl = el.src || el.getAttribute('data-src') || el.getAttribute('data-original');
-                                if (targetUrl) { type = 'image'; break; }
-                            } else if (tag === 'a' && el.href) {
-                                targetUrl = el.href;
-                                type = 'link';
-                                break;
+                                if (targetUrl) break; // Image එකක් අහු වුණ ගමන් Loop එක නවත්තනවා!
                             }
                         }
 
                         if (targetUrl) {
-                            e.preventDefault(); // Stop ONLY the default Android Popup
+                            e.preventDefault(); 
+                            e.stopPropagation();
                             
-                            try { if (navigator.vibrate) navigator.vibrate(50); } catch(err){}
+                            try { if (navigator.vibrate) navigator.vibrate([50, 50]); } catch(err){}
                             
-                            var payloadStr = type + "|||" + targetUrl;
+                            var payloadStr = "image|||" + targetUrl;
                             var utf8 = new TextEncoder().encode(payloadStr);
                             var hex = '';
                             for(var j=0; j<utf8.length; j++) {
                                 hex += utf8[j].toString(16).padStart(2, '0');
                             }
                             
-                            // Anchor Hack එකෙන් Rust එකට යවනවා (Iframe CSP block වෙන්නෙත් නෑ, location.href Clicks හිර කරන්නෙත් නෑ)
-                            var a = document.createElement('a');
-                            a.href = "https://rc.context.menu/?data=" + hex;
-                            a.style.display = 'none';
-                            document.body.appendChild(a);
-                            a.click();
-                            setTimeout(function() { document.body.removeChild(a); }, 100);
+                            // location.replace is bulletproof against SPA routers
+                            window.location.replace("https://rc.context.menu/?data=" + hex);
                         }
-                    } catch(err) {}
-                }, true); // Capture phase guarantees we catch it
+                        lastTapTime = 0; // Reset
+                    } else {
+                        lastTapTime = currentTime;
+                    }
+                }, { passive: false });
             })();
         "#);
 
         let app_for_nav = app.clone();
         webview_builder = webview_builder.on_navigation(move |url| {
             let url_str = url.as_str();
+            
             if url_str.starts_with("https://rc.context.menu/?data=") {
                 let hex_data = url_str.trim_start_matches("https://rc.context.menu/?data=");
                 let decoded = decode_hex(hex_data);
@@ -175,10 +175,10 @@ async fn open_webview(
                 
                 if parts.len() == 2 {
                     let payload = serde_json::json!({
-                        "type": parts[0],
                         "url": parts[1]
                     });
-                    let _ = app_for_nav.emit("show-context-menu", payload);
+                    // React එකට Download Event එක යවනවා
+                    let _ = app_for_nav.emit("auto-download-image", payload);
                 }
                 return false; 
             }
