@@ -1,13 +1,13 @@
-use tauri::{AppHandle, Manager};
 use serde::Serialize;
-use std::net::{TcpStream, SocketAddr};
-use std::time::{Instant, Duration};
+use std::net::{SocketAddr, TcpStream};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Manager};
 
 #[cfg(desktop)]
-use tauri::{WebviewBuilder, PhysicalPosition, PhysicalSize};
+use tauri::{PhysicalPosition, PhysicalSize, WebviewBuilder};
 
 #[cfg(mobile)]
-use tauri::{WebviewWindowBuilder, PhysicalPosition, PhysicalSize};
+use tauri::{PhysicalPosition, PhysicalSize, WebviewWindowBuilder};
 
 #[derive(Serialize)]
 struct SystemMetrics {
@@ -48,7 +48,10 @@ async fn open_webview(
 
     #[cfg(desktop)]
     {
-        let main_window = app.get_window("main").or_else(|| app.get_window("main_window")).ok_or("Main window not found")?;
+        let main_window = app
+            .get_window("main")
+            .or_else(|| app.get_window("main_window"))
+            .ok_or("Main window not found")?;
 
         if let Some(webview) = app.get_webview(&label) {
             let _ = webview.navigate(url_data);
@@ -58,15 +61,21 @@ async fn open_webview(
         }
 
         let webview_builder = WebviewBuilder::new(&label, tauri::WebviewUrl::External(url_data));
-        
-        main_window.add_child(
-            webview_builder,
-            PhysicalPosition::new(x as i32, y as i32),
-            PhysicalSize::new(width as u32, height as u32),
-        ).map_err(|e| format!("Failed to create webview: {}", e))?;
+
+        main_window
+            .add_child(
+                webview_builder,
+                PhysicalPosition::new(x as i32, y as i32),
+                PhysicalSize::new(width as u32, height as u32),
+            )
+            .map_err(|e| format!("Failed to create webview: {}", e))?;
 
         if let Some(webview) = app.get_webview(&label) {
-            let js = if theme == "dark" { "document.documentElement.classList.add('dark');" } else { "document.documentElement.classList.remove('dark');" };
+            let js = if theme == "dark" {
+                "document.documentElement.classList.add('dark');"
+            } else {
+                "document.documentElement.classList.remove('dark');"
+            };
             let _ = webview.eval(js);
         }
     }
@@ -136,30 +145,29 @@ async fn resize_browser_webview(
     label: String,
     top_margin: f64,
     bottom_margin: f64,
-    #[allow(unused_variables)]
-    top_margin_css: f64,
-    #[allow(unused_variables)]
-    bottom_margin_css: f64,
+    #[allow(unused_variables)] top_margin_css: f64,
+    #[allow(unused_variables)] bottom_margin_css: f64,
 ) -> Result<(), String> {
     #[cfg(desktop)]
     {
         if let Some(webview) = app.get_webview(&label) {
-            let main_window = app.get_window("main")
+            let main_window = app
+                .get_window("main")
                 .or_else(|| app.get_window("main_window"))
                 .ok_or_else(|| "Main window not found".to_string())?;
-            
+
             let size = main_window.inner_size().map_err(|e| e.to_string())?;
-            
+
             let safe_top = top_margin.max(0.0) as i32;
             let safe_bottom = bottom_margin.max(0.0) as i32;
-            
+
             let mut height = (size.height as i32 - safe_top - safe_bottom).max(100) as u32;
             let y = safe_top;
-            
+
             if (y + height as i32) > size.height as i32 {
                 height = (size.height as i32 - y).max(100) as u32;
             }
-            
+
             let _ = webview.set_position(PhysicalPosition::new(0, y));
             let _ = webview.set_size(PhysicalSize::new(size.width, height));
         }
@@ -183,7 +191,11 @@ async fn set_webview_theme(app: AppHandle, label: String, theme: String) -> Resu
     #[cfg(desktop)]
     {
         if let Some(webview) = app.get_webview(&label) {
-            let js = if theme == "dark" { "document.documentElement.classList.add('dark');" } else { "document.documentElement.classList.remove('dark');" };
+            let js = if theme == "dark" {
+                "document.documentElement.classList.add('dark');"
+            } else {
+                "document.documentElement.classList.remove('dark');"
+            };
             let _ = webview.eval(js);
         }
     }
@@ -246,36 +258,44 @@ async fn reload_webview(app: AppHandle, label: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn get_system_metrics(
-    #[allow(unused_variables)]
-    state: tauri::State<'_, SystemState>
+    #[allow(unused_variables)] state: tauri::State<'_, SystemState>,
 ) -> Result<SystemMetrics, String> {
     #[cfg(desktop)]
     {
         let mut sys = state.0.lock().map_err(|e| e.to_string())?;
-        
+
         let pid = sysinfo::get_current_pid().map_err(|e| e.to_string())?;
         sys.refresh_process(pid);
-        
+
         if let Some(process) = sys.process(pid) {
             let cpu = process.cpu_usage();
             let ram = process.memory() / 1024 / 1024; // Convert bytes to MB
             let ping = get_ping();
-            
+
             Ok(SystemMetrics { cpu, ram, ping })
         } else {
             let ping = get_ping();
-            Ok(SystemMetrics { cpu: 0.0, ram: 0, ping })
+            Ok(SystemMetrics {
+                cpu: 0.0,
+                ram: 0,
+                ping,
+            })
         }
     }
     #[cfg(mobile)]
     {
-        Ok(SystemMetrics { cpu: 0.0, ram: 0, ping: 0 })
+        Ok(SystemMetrics {
+            cpu: 0.0,
+            ram: 0,
+            ping: 0,
+        })
     }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .manage(SystemState(std::sync::Mutex::new(sysinfo::System::new_all())))
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![

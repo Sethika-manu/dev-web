@@ -28,6 +28,7 @@ import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
+import { open } from "@tauri-apps/plugin-shell"; // Add this import
 
 interface Session {
   id: string;
@@ -67,6 +68,9 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<{title: string, desc: string} | null>(null);
   const [progressStates, setProgressStates] = useState<Record<string, number>>({});
   const [isUpdating, setIsUpdating] = useState(false);
+  
+  // NEW STATE: Fallback URL එක Popup එකේ පෙන්නන්න
+  const [fallbackUpdateUrl, setFallbackUpdateUrl] = useState<string | null>(null);
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
 
@@ -142,15 +146,27 @@ export default function App() {
       try {
         const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         
+        const isNewerVersion = (remote: string, local: string) => {
+          const rParts = remote.split('.').map(Number);
+          const lParts = local.split('.').map(Number);
+          
+          for (let i = 0; i < Math.max(rParts.length, lParts.length); i++) {
+            const r = rParts[i] || 0;
+            const l = lParts[i] || 0;
+            if (r > l) return true;
+            if (r < l) return false;
+          }
+          return false;
+        };
+
         if (isMobileDevice) {
           // --- MOBILE CUSTOM UPDATER ---
           const currentVer = await getVersion();
           
-          // ඔයාගේ GitHub Raw Link එක මෙතන තියෙනවා
           const response = await fetch("https://raw.githubusercontent.com/Sethika-manu/dev-web/refs/heads/main/update.json");
           const updateData = await response.json();
           
-          if (updateData.version !== currentVer) {
+          if (isNewerVersion(updateData.version, currentVer)) {
             const apkUrl = updateData.platforms?.android?.url;
             
             if (apkUrl) {
@@ -165,11 +181,15 @@ export default function App() {
               );
 
               if (wantsUpdate) {
-                setToastMessage({ title: 'Downloading Update...', desc: 'Please check your notification panel.' });
+                setToastMessage({ title: 'Opening Download...', desc: 'Please check your browser to download the APK.' });
                 
-                const win = window as any;
-                if (win.NativeBridge || win.AndroidBridge) {
-                  (win.NativeBridge || win.AndroidBridge).updateApp(apkUrl);
+                try {
+                  // 1. මුලින්ම Tauri Shell එකෙන් Try කරනවා
+                  await open(apkUrl);
+                } catch (err) {
+                  console.error("Shell open failed, showing fallback UI:", err);
+                  // 2. ඒක Fail වුණොත්, අපේ ලස්සන Custom React Modal එක Open කරනවා
+                  setFallbackUpdateUrl(apkUrl);
                 }
               }
             }
@@ -441,6 +461,55 @@ export default function App() {
               <div className="text-sm font-semibold text-neutral-900 dark:text-white">{toastMessage.title}</div>
               <div className="text-xs text-neutral-500 max-w-[200px] truncate">{toastMessage.desc}</div>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* NEW FALLBACK MODAL FOR AUTO-DOWNLOAD FAILURES */}
+      <AnimatePresence>
+        {fallbackUpdateUrl && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }} 
+            className="absolute inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 pointer-events-auto"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-[#1a1a1a] rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-neutral-200 dark:border-neutral-800"
+            >
+              <h3 className="text-lg font-bold text-neutral-900 dark:text-white mb-2">Update Required</h3>
+              <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-4">
+                Auto-download blocked by device. Copy the link below and open it in Chrome to install the update.
+              </p>
+              <div className="bg-neutral-100 dark:bg-neutral-900 p-3 rounded-xl flex items-center gap-2 mb-6 border border-neutral-200 dark:border-neutral-800">
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={fallbackUpdateUrl} 
+                  className="bg-transparent border-none outline-none text-xs text-neutral-700 dark:text-neutral-300 w-full"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setFallbackUpdateUrl(null)} 
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold text-neutral-700 dark:text-neutral-300 bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
+                >
+                  Close
+                </button>
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(fallbackUpdateUrl);
+                    setToastMessage({ title: 'Copied!', desc: 'Link copied to clipboard.' });
+                  }} 
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold text-white bg-accent hover:bg-accent/90 transition-colors shadow-lg shadow-accent/20"
+                >
+                  Copy Link
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

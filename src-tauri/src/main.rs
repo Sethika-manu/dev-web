@@ -3,5 +3,5 @@
 
 fn main() {
     // අර Cargo.toml එකේ අපි "app_lib" කියලා දුන්න නම තමයි මෙතන තියෙන්නේ
-    app_lib::run(); 
+    app_lib::run();
 }
