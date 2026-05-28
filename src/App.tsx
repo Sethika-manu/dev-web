@@ -58,7 +58,7 @@ const getFileName = (path: string, url: string) => {
       if (name) return name;
     }
   }
-  return 'Unknown File';
+  return 'RC_Image.jpg';
 };
 
 export default function App() {
@@ -154,9 +154,9 @@ export default function App() {
         return newHistory;
       });
       if (e.detail.status === 'completed') {
-         setToastMessage({ title: 'Download Complete', desc: `${fileName} saved successfully!` });
+         setToastMessage({ title: 'Success!', desc: `Image saved to Gallery!` });
       } else {
-         setToastMessage({ title: 'Download Failed', desc: `Could not save ${fileName}` });
+         setToastMessage({ title: 'Failed', desc: `Could not save image.` });
       }
     };
 
@@ -297,6 +297,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => setToastMessage(null), 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
+  useEffect(() => {
     if (localStorage.getItem('rc_restore_tabs') === 'true') {
       localStorage.setItem('rc_saved_sessions', JSON.stringify(sessions));
       if (activeSessionId) {
@@ -403,7 +410,6 @@ export default function App() {
     }
   };
 
-  // 🚨 POPUP එක වහනකොට ආපහු Native WebView එක උඩට ගන්න Function එක 🚨
   const closeContextMenu = () => {
     setContextMenuData(null);
     if (isMobile) {
@@ -426,7 +432,7 @@ export default function App() {
     >
       <div 
         id="top-bar-container"
-        className="w-full bg-gray-900 dark:bg-gray-900 border-b border-white/5 flex-shrink-0 relative flex flex-col"
+        className="w-full bg-gray-900 dark:bg-gray-900 border-b border-white/5 flex-shrink-0 relative flex flex-col z-[50]"
         style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
         <TitleBar 
@@ -435,23 +441,6 @@ export default function App() {
           onSearchChange={setSearchValue}
           activeSessionId={activeSessionId}
         />
-        
-        <AnimatePresence>
-          {toastMessage && (
-            <motion.div 
-              initial={{ height: 0, opacity: 0 }} 
-              animate={{ height: 'auto', opacity: 1 }} 
-              exit={{ height: 0, opacity: 0 }} 
-              transition={{ duration: 0.3 }}
-              className="w-full bg-accent/20 border-b border-accent/30 overflow-hidden flex items-center justify-center z-50"
-            >
-              <div className="py-1.5 px-4 flex items-center gap-2 text-xs font-semibold text-accent dark:text-accent drop-shadow-sm truncate">
-                <Download size={14} className="animate-bounce flex-shrink-0" />
-                <span className="truncate">{toastMessage.title} - {toastMessage.desc}</span>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-transparent overflow-hidden z-50">
           <AnimatePresence>
@@ -540,7 +529,27 @@ export default function App() {
         </main>
       </div>
 
-      {/* 🚨 CUSTOM CENTERED POPUP MENU (Close Event එකත් එක්ක) 🚨 */}
+      {/* 🚨 අලුත් FLOATING TOAST MESSAGE (Screen එකේ යටින් පෙන්නනවා, Native WebView එකට යට වෙන්නේ නෑ!) 🚨 */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div 
+            initial={{ y: 80, opacity: 0, translateX: "-50%" }} 
+            animate={{ y: 0, opacity: 1, translateX: "-50%" }} 
+            exit={{ y: 80, opacity: 0, translateX: "-50%" }} 
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            className="fixed bottom-[90px] md:bottom-6 left-1/2 w-[90%] max-w-[320px] bg-[#2563eb] text-white py-3 px-4 rounded-xl shadow-2xl z-[9999999] flex items-center gap-3 border border-white/20 pointer-events-none"
+          >
+            <div className="bg-white/20 p-1.5 rounded-full flex-shrink-0">
+              <Download size={16} className="animate-bounce" />
+            </div>
+            <div className="flex flex-col overflow-hidden">
+              <span className="font-bold text-[13px] drop-shadow-md truncate">{toastMessage.title}</span>
+              <span className="text-[11px] text-white/90 truncate">{toastMessage.desc}</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {contextMenuData && (
           <motion.div 
@@ -548,7 +557,7 @@ export default function App() {
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }} 
             className="absolute inset-0 z-[999999] flex items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-auto p-4"
-            onClick={closeContextMenu} // 👈 මෙතන closeContextMenu දැම්මා
+            onClick={closeContextMenu} 
           >
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }} 
@@ -572,7 +581,7 @@ export default function App() {
                   <button 
                     onClick={() => {
                       handleCreateSession(contextMenuData.url);
-                      closeContextMenu(); // 👈 මෙතන closeContextMenu දැම්මා
+                      closeContextMenu(); 
                     }} 
                     className="w-full py-3.5 rounded-xl text-sm font-semibold text-white bg-accent hover:bg-accent/90 transition-colors shadow-lg shadow-accent/20 flex items-center justify-center gap-2"
                   >
@@ -583,15 +592,16 @@ export default function App() {
                 {contextMenuData.type === 'image' && (
                   <button 
                     onClick={async () => {
-                      closeContextMenu(); // 👈 මෙතන closeContextMenu දැම්මා
-                      setToastMessage({ title: 'Starting Download', desc: 'Preparing image...' });
-                      if (activeSessionId) {
-                        try {
-                          await invoke("trigger_download", { label: activeSessionId, url: contextMenuData.url });
-                        } catch (e) {
-                          console.error("Download failed:", e);
-                        }
+                      setToastMessage({ title: 'Downloading...', desc: 'Please wait...' });
+                      const win = window as any;
+                      if (win.NativeBridge) {
+                        win.NativeBridge.downloadImage(contextMenuData.url);
+                      } else if (win.AndroidBridge) {
+                        win.AndroidBridge.downloadImage(contextMenuData.url);
+                      } else {
+                        try { await invoke("trigger_download", { label: activeSessionId || "main", url: contextMenuData.url }); } catch(e){}
                       }
+                      closeContextMenu(); 
                     }} 
                     className="w-full py-3.5 rounded-xl text-sm font-semibold text-white bg-accent hover:bg-accent/90 transition-colors shadow-lg shadow-accent/20 flex items-center justify-center gap-2"
                   >
@@ -603,7 +613,7 @@ export default function App() {
                   onClick={() => {
                     navigator.clipboard.writeText(contextMenuData.url);
                     setToastMessage({ title: 'Copied!', desc: 'Link copied to clipboard.' });
-                    closeContextMenu(); // 👈 මෙතන closeContextMenu දැම්මා
+                    closeContextMenu(); 
                   }} 
                   className="w-full py-3.5 rounded-xl text-sm font-semibold text-neutral-800 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors flex items-center justify-center gap-2 border border-transparent dark:border-white/5"
                 >
@@ -611,7 +621,7 @@ export default function App() {
                 </button>
                 
                 <button 
-                  onClick={closeContextMenu} // 👈 මෙතන closeContextMenu දැම්මා
+                  onClick={closeContextMenu} 
                   className="w-full py-3.5 rounded-xl text-sm font-bold text-red-500 hover:text-white bg-red-500/10 hover:bg-red-500 transition-colors mt-2"
                 >
                   Cancel

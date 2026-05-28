@@ -17,6 +17,11 @@ import android.os.Vibrator
 import android.os.VibrationEffect
 import android.content.Context
 import java.net.URLEncoder
+import android.app.DownloadManager
+import android.os.Environment
+import android.util.Base64
+import android.content.ContentValues
+import android.provider.MediaStore
 
 class MainActivity : TauriActivity() {
     private var tauriWebView: WebView? = null
@@ -56,7 +61,6 @@ class MainActivity : TauriActivity() {
                     }
                 }
 
-                // 🚨 NATIVE OS-LEVEL LONG PRESS DETECTOR 🚨
                 setOnLongClickListener {
                     val result = hitTestResult
                     val url = result.extra
@@ -84,9 +88,7 @@ class MainActivity : TauriActivity() {
 
                             val escapedUrl = url.replace("'", "\\'").replace("\"", "\\\"")
                             tauriWebView?.post {
-                                // 🚨 REACT WEBVIEW එක උඩට ගන්නවා POPUP එක පෙන්නන්න 🚨
                                 tauriWebView?.bringToFront()
-                                
                                 val js = "window.dispatchEvent(new CustomEvent('rc-native-context-menu', { detail: { type: '$payloadType', url: '$escapedUrl' } }));"
                                 tauriWebView?.evaluateJavascript(js, null)
                             }
@@ -117,7 +119,7 @@ class MainActivity : TauriActivity() {
             nativeWebView?.setBackgroundColor(Color.WHITE)
         }
 
-        val bridge = AndroidBridge(nativeWebView)
+        val bridge = AndroidBridge(nativeWebView, tauriWebView, this)
         webView.addJavascriptInterface(bridge, "NativeBridge")
         webView.addJavascriptInterface(bridge, "AndroidBridge")
     }
@@ -133,14 +135,77 @@ class MainActivity : TauriActivity() {
     }
 }
 
-class AndroidBridge(private val nativeWebView: WebView?) {
+class AndroidBridge(
+    private val nativeWebView: WebView?,
+    private val tauriWebView: WebView?,
+    private val context: Context
+) {
     
-    // 🚨 React එකෙන් Menu එක Close කරාම ආපහු Google එක උඩට ගන්න Function එක 🚨
     @JavascriptInterface
     fun hideContextMenu() {
         Handler(Looper.getMainLooper()).post {
             nativeWebView?.bringToFront()
         }
+    }
+
+    // 🚨 BASE64 සහ NATIVE URL දෙකටම වැඩ කරන SUPREME DOWNLOAD MANAGER එක 🚨
+    @JavascriptInterface
+    fun downloadImage(url: String) {
+        Handler(Looper.getMainLooper()).post {
+            try {
+                var fileName = "RC_Image_${System.currentTimeMillis()}.jpg"
+
+                if (url.startsWith("data:")) {
+                    // Google එකේ Base64 Images Gallery එකට සේව් කරන කෑල්ල
+                    val base64Data = url.substringAfter(",")
+                    val decodedBytes = Base64.decode(base64Data, Base64.DEFAULT)
+                    
+                    val resolver = context.contentResolver
+                    val contentValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/RC Browser")
+                    }
+                    
+                    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                    if (uri != null) {
+                        resolver.openOutputStream(uri)?.use { 
+                            it.write(decodedBytes) 
+                        }
+                    }
+                    sendSuccessEvent(url, fileName)
+                } else {
+                    // සාමාන්‍ය HTTP/HTTPS URL බාන කෑල්ල
+                    val uri = Uri.parse(url)
+                    fileName = uri.lastPathSegment ?: fileName
+                    if (!fileName.contains(".")) fileName += ".jpg"
+
+                    val request = DownloadManager.Request(uri).apply {
+                        setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                        setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                        setTitle(fileName)
+                        setDescription("Downloading image via RC Browser...")
+                        @Suppress("DEPRECATION")
+                        allowScanningByMediaScanner() // Gallery එකට පෙන්නන්න කියනවා
+                    }
+                    
+                    val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                    dm.enqueue(request)
+                    
+                    sendSuccessEvent(url, fileName)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    // React History එක Update කරන්න කතා කරන කෑල්ල
+    private fun sendSuccessEvent(url: String, fileName: String) {
+        val escapedUrl = url.replace("'", "\\'").replace("\"", "\\\"")
+        val escapedPath = fileName.replace("'", "\\'").replace("\"", "\\\"")
+        val js = "window.dispatchEvent(new CustomEvent('rc-download-finished', { detail: { id: Date.now().toString(), url: '$escapedUrl', path: '$escapedPath', timestamp: Date.now(), status: 'completed' } }));"
+        tauriWebView?.evaluateJavascript(js, null)
     }
 
     @JavascriptInterface
