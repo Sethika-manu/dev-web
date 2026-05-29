@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::net::{SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(desktop)]
 use tauri::{PhysicalPosition, PhysicalSize, WebviewBuilder};
@@ -85,7 +85,8 @@ async fn open_webview(
             return Ok(());
         }
 
-        let mut webview_builder = WebviewBuilder::new(&label, tauri::WebviewUrl::External(url_data));
+        let mut webview_builder =
+            WebviewBuilder::new(&label, tauri::WebviewUrl::External(url_data));
 
         // 🚨 100% RELIABLE DOUBLE-TAP HACK 🚨
         webview_builder = webview_builder.initialization_script(r#"
@@ -167,12 +168,12 @@ async fn open_webview(
         let app_for_nav = app.clone();
         webview_builder = webview_builder.on_navigation(move |url| {
             let url_str = url.as_str();
-            
+
             if url_str.starts_with("https://rc.context.menu/?data=") {
                 let hex_data = url_str.trim_start_matches("https://rc.context.menu/?data=");
                 let decoded = decode_hex(hex_data);
                 let parts: Vec<&str> = decoded.split("|||").collect();
-                
+
                 if parts.len() == 2 {
                     let payload = serde_json::json!({
                         "url": parts[1]
@@ -180,9 +181,9 @@ async fn open_webview(
                     // React එකට Download Event එක යවනවා
                     let _ = app_for_nav.emit("auto-download-image", payload);
                 }
-                return false; 
+                return false;
             }
-            true 
+            true
         });
 
         webview_builder = webview_builder.on_download(move |webview, event| {
@@ -454,7 +455,15 @@ async fn get_system_metrics(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .plugin(tauri_plugin_shell::init())
         .manage(SystemState(std::sync::Mutex::new(sysinfo::System::new_all())))
         .plugin(tauri_plugin_dialog::init())

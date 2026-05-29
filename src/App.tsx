@@ -247,19 +247,8 @@ export default function App() {
                 try {
                   await open(apkUrl);
                 } catch (err) {
-                  try {
-                    if (navigator?.clipboard?.writeText) {
-                      await navigator.clipboard.writeText(apkUrl);
-                    } else throw new Error("Clipboard API not available");
-                  } catch (clipErr) {
-                    const textArea = document.createElement("textarea");
-                    textArea.value = apkUrl;
-                    textArea.style.position = "fixed"; document.body.appendChild(textArea);
-                    textArea.focus(); textArea.select();
-                    try { document.execCommand('copy'); } catch (err) {}
-                    document.body.removeChild(textArea);
-                  }
-                  alert("Auto-download was blocked by your device.\n\nThe update link has been copied to your clipboard. Please open Chrome or your default browser, paste the link, and download the update.");
+                  // 🚨 මෙන්න ඊයේ අපි හදපු ලස්සන Fallback UI එකට Data පාස් කරන තැන 🚨
+                  setFallbackUpdateUrl(apkUrl);
                 }
               }
             }
@@ -529,7 +518,6 @@ export default function App() {
         </main>
       </div>
 
-      {/* 🚨 අලුත් FLOATING TOAST MESSAGE (Screen එකේ යටින් පෙන්නනවා, Native WebView එකට යට වෙන්නේ නෑ!) 🚨 */}
       <AnimatePresence>
         {toastMessage && (
           <motion.div 
