@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { emit } from '@tauri-apps/api/event';
 
 type Theme = 'System' | 'Dark' | 'Light';
 type Language = 'English (US)' | 'Sinhala (LK)' | 'Singlish';
@@ -126,7 +128,14 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
     }
     
     root.setAttribute('data-theme', themeValue);
+    root.style.colorScheme = themeValue === 'dark' ? 'dark' : 'light';
     localStorage.setItem('app-theme', theme);
+
+    getCurrentWindow().setTheme(themeValue === 'dark' ? 'dark' : 'light')
+      .catch((err) => console.warn("Failed to set native window theme:", err));
+
+    emit('theme-toggle', { theme: themeValue })
+      .catch((err) => console.warn("Failed to emit theme-toggle event:", err));
   }, [theme]);
 
   useEffect(() => {

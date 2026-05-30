@@ -421,7 +421,7 @@ export default function App() {
     >
       <div 
         id="top-bar-container"
-        className="w-full bg-gray-900 dark:bg-gray-900 border-b border-white/5 flex-shrink-0 relative flex flex-col z-[50]"
+        className="w-full bg-white dark:bg-gray-900 border-b border-neutral-200 dark:border-white/5 flex-shrink-0 relative flex flex-col z-[50]"
         style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
         <TitleBar 
@@ -714,7 +714,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Bottom Footer Section */}
-      <div id="bottom-bar-container" className="flex-shrink-0 w-full z-[99999] relative bg-gray-900 dark:bg-gray-900">
+      <div id="bottom-bar-container" className="flex-shrink-0 w-full z-[99999] relative bg-white dark:bg-gray-900 border-t border-neutral-200 dark:border-neutral-800/80">
         <AnimatePresence>
           {(toastMessage && isMobile) && (
             <motion.div
@@ -775,8 +775,7 @@ export default function App() {
         </AnimatePresence>
 
         <nav 
-          className="md:hidden w-full h-[calc(68px+env(safe-area-inset-bottom,0px))] bg-gray-900 dark:bg-gray-900 border-t border-neutral-200 dark:border-neutral-800/80 flex items-center justify-around px-2"
-          style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+          className="md:hidden w-full h-[110px] bg-white dark:bg-gray-900 flex items-center justify-around px-2 pb-[env(safe-area-inset-bottom,0px)]"
         >
           <button onClick={handleGoHome} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
             <HomeIcon size={20} className="mb-1" /><span>Home</span>
@@ -784,7 +783,7 @@ export default function App() {
           <button onClick={() => handleNavClick('tabs')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors relative">
             <div className="relative mb-1">
               <Layers size={20} />
-              {sessions.length > 0 && <span className="absolute -top-1.5 -right-2 bg-accent text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-[#0c0c0c] dark:border-[#0c0c0c]">{sessions.length}</span>}
+              {sessions.length > 0 && <span className="absolute -top-1.5 -right-2 bg-accent text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-white dark:border-[#0c0c0c]">{sessions.length}</span>}
             </div>
             <span>Tabs</span>
           </button>

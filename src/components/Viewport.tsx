@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useSettings } from "./SettingsContext";
 
 interface Session {
   id: string;
@@ -20,6 +21,10 @@ export const Viewport = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedWebviews = useRef<Set<string>>(new Set());
+  const { theme } = useSettings();
+  const isDarkMode = theme === 'System'
+    ? window.matchMedia('(prefers-color-scheme: dark)').matches
+    : theme === 'Dark';
 
   const isMobileLayout = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
 
@@ -191,6 +196,10 @@ export const Viewport = ({
   }, []);
 
   return (
-    <div ref={containerRef} className="absolute inset-0 bg-transparent flex items-center justify-center pointer-events-none z-0" />
+    <div 
+      ref={containerRef} 
+      className="absolute inset-0 bg-transparent flex items-center justify-center pointer-events-none z-0" 
+      style={{ colorScheme: isDarkMode ? 'dark' : 'light' }}
+    />
   );
 };
