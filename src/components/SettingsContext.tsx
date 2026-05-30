@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 type Theme = 'System' | 'Dark' | 'Light';
 type Language = 'English (US)' | 'Sinhala (LK)' | 'Singlish';
@@ -20,7 +21,7 @@ const translations: Record<Language, Record<string, string>> = {
     'nav_new_session': 'New Session',
     'nav_console': 'Console',
     'nav_settings': 'Settings',
-    'nav_projects': 'PROJECTS',
+    'nav_home': 'HOME',
     'home_ready': 'Ready for Exploration',
     'home_docs': 'Documentation',
     'home_media': 'Multimedia',
@@ -45,7 +46,7 @@ const translations: Record<Language, Record<string, string>> = {
     'nav_new_session': 'නව සැසිය',
     'nav_console': 'පර්යන්තය',
     'nav_settings': 'සැකසුම්',
-    'nav_projects': 'ව්‍යාපෘති',
+    'nav_home': 'මුල් පිටුව',
     'home_ready': 'ගවේෂණයට සූදානම්',
     'home_docs': 'ලේඛන',
     'home_media': 'බහුමාධ්‍ය',
@@ -70,7 +71,7 @@ const translations: Record<Language, Record<string, string>> = {
     'nav_new_session': 'Aluth Session ekak',
     'nav_console': 'Console eka',
     'nav_settings': 'Settings kalla',
-    'nav_projects': 'Projects tika',
+    'nav_home': 'Home eka',
     'home_ready': 'Wadeeta Ready',
     'home_docs': 'Poth Path',
     'home_media': 'Videos n Stuff',
@@ -126,7 +127,11 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
     }
     
     root.setAttribute('data-theme', themeValue);
+    root.style.colorScheme = themeValue === 'dark' ? 'dark' : 'light';
     localStorage.setItem('app-theme', theme);
+
+    getCurrentWindow().setTheme(themeValue === 'dark' ? 'dark' : 'light')
+      .catch((err) => console.warn("Failed to set native window theme:", err));
   }, [theme]);
 
   useEffect(() => {

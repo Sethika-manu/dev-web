@@ -418,6 +418,24 @@ async fn reload_webview(app: AppHandle, label: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn navigate_webview(app: AppHandle, label: String, url: String) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        let url_data: tauri::Url = url.parse().map_err(|e| format!("Invalid URL: {}", e))?;
+        if let Some(webview) = app.get_webview(&label) {
+            let _ = webview.navigate(url_data);
+        }
+    }
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        let _ = label;
+        let _ = url;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn get_system_metrics(
     #[allow(unused_variables)] state: tauri::State<'_, SystemState>,
 ) -> Result<SystemMetrics, String> {
@@ -477,6 +495,7 @@ pub fn run() {
             go_back,
             go_forward,
             reload_webview,
+            navigate_webview,
             resize_browser_webview,
             trigger_download
         ])

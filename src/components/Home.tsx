@@ -157,10 +157,9 @@ export const Home = ({ onNavigate }: HomeProps) => {
                 key={site.url}
                 onClick={() => {
                   const targetUrl = site.url;
-                  if ((window as any).NativeBridge) {
-                    (window as any).NativeBridge.loadNativeUrl(targetUrl);
-                  } else {
-                    console.error("NativeBridge is not available");
+                  const win = window as any;
+                  if (win.NativeBridge || win.AndroidBridge) {
+                    (win.NativeBridge || win.AndroidBridge).loadNativeUrl(targetUrl);
                   }
                   onNavigate(targetUrl);
                 }}

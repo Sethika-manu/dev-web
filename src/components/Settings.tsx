@@ -16,6 +16,8 @@ import { motion } from "framer-motion";
 import { useSettings } from "./SettingsContext";
 import { getVersion } from "@tauri-apps/api/app";
 
+declare const __BUILD_DATE__: string;
+
 type Language = 'English (US)' | 'Sinhala (LK)' | 'Singlish';
 
 const TRANSLATIONS: Record<Language, any> = {
@@ -107,11 +109,14 @@ export const Settings = () => {
   } = useSettings();
 
   const [appVersion, setAppVersion] = useState("0.1.0");
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch((err) => {
       console.error("Failed to get app version:", err);
     });
+    const checkMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    setIsMobile(checkMobile);
   }, []);
 
   const t = TRANSLATIONS[language];
@@ -261,42 +266,45 @@ export const Settings = () => {
                 {section.title}
               </h2>
               <div className="bg-white dark:bg-neutral-900/30 border border-neutral-200 dark:border-white/5 rounded-2xl overflow-hidden backdrop-blur-sm shadow-sm dark:shadow-none">
-                {section.items.map((item, i) => (
-                  <div 
-                    key={item.label}
-                    onClick={item.readOnly ? undefined : item.onClick}
-                    className={`flex items-center justify-between p-4 transition-colors ${
-                      item.readOnly ? 'cursor-default opacity-80' : 'cursor-pointer hover:bg-neutral-50 dark:hover:bg-white/[0.02]'
-                    } ${
-                      i !== section.items.length - 1 ? 'border-b border-neutral-100 dark:border-white/5' : ''
-                    }`}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="text-neutral-500 dark:text-neutral-400 p-2 bg-neutral-100 dark:bg-neutral-900 rounded-lg border border-neutral-200 dark:border-white/5">
-                        {item.icon}
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-neutral-800 dark:text-neutral-200">{item.label}</div>
-                        <div className="text-xs text-neutral-500 dark:text-neutral-500">{item.description}</div>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-3">
-                      {item.value && (
-                        <span className="text-xs text-neutral-600 dark:text-neutral-400 font-mono bg-neutral-100 dark:bg-neutral-900 px-2 py-1 rounded border border-neutral-200 dark:border-white/5">
-                          {item.value}
-                        </span>
-                      )}
-                      {item.toggle ? (
-                        <div className={`w-9 h-5 rounded-full relative transition-colors duration-200 ${item.checked ? 'bg-accent' : 'bg-neutral-300 dark:bg-neutral-800'}`}>
-                          <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform duration-200 ${item.checked ? 'translate-x-4' : 'translate-x-0'}`} />
+                {(() => {
+                  const visibleItems = section.items.filter(item => !(item.label === t.auto_update && isMobile));
+                  return visibleItems.map((item, i) => (
+                    <div 
+                      key={item.label}
+                      onClick={item.readOnly ? undefined : item.onClick}
+                      className={`flex items-center justify-between p-4 transition-colors ${
+                        item.readOnly ? 'cursor-default opacity-80' : 'cursor-pointer hover:bg-neutral-50 dark:hover:bg-white/[0.02]'
+                      } ${
+                        i !== visibleItems.length - 1 ? 'border-b border-neutral-100 dark:border-white/5' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="text-neutral-500 dark:text-neutral-400 p-2 bg-neutral-100 dark:bg-neutral-900 rounded-lg border border-neutral-200 dark:border-white/5">
+                          {item.icon}
                         </div>
-                      ) : !item.readOnly && (
-                        <ChevronRight size={16} className="text-neutral-400 dark:text-neutral-700" />
-                      )}
+                        <div>
+                          <div className="text-sm font-medium text-neutral-800 dark:text-neutral-200">{item.label}</div>
+                          <div className="text-xs text-neutral-500 dark:text-neutral-500">{item.description}</div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-3">
+                        {item.value && (
+                          <span className="text-xs text-neutral-600 dark:text-neutral-400 font-mono bg-neutral-100 dark:bg-neutral-900 px-2 py-1 rounded border border-neutral-200 dark:border-white/5">
+                            {item.value}
+                          </span>
+                        )}
+                        {item.toggle ? (
+                          <div className={`w-9 h-5 rounded-full relative transition-colors duration-200 ${item.checked ? 'bg-accent' : 'bg-neutral-300 dark:bg-neutral-800'}`}>
+                            <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform duration-200 ${item.checked ? 'translate-x-4' : 'translate-x-0'}`} />
+                          </div>
+                        ) : !item.readOnly && (
+                          <ChevronRight size={16} className="text-neutral-400 dark:text-neutral-700" />
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ));
+                })()}
               </div>
             </motion.div>
           ))}

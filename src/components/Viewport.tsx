@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useSettings } from "./SettingsContext";
 
 interface Session {
   id: string;
@@ -20,6 +21,10 @@ export const Viewport = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedWebviews = useRef<Set<string>>(new Set());
+  const { theme } = useSettings();
+  const isDarkMode = theme === 'System'
+    ? window.matchMedia('(prefers-color-scheme: dark)').matches
+    : theme === 'Dark';
 
   const isMobileLayout = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
 
@@ -75,10 +80,7 @@ export const Viewport = ({
         for (const session of sessions) {
           const hasBeenInitialized = initializedWebviews.current.has(session.id);
           if (session.url === "") {
-            if (hasBeenInitialized) {
-              await invoke("close_webview", { label: session.id }).catch((e) => console.warn("Close Error:", e));
-              initializedWebviews.current.delete(session.id);
-            }
+            // Keep the WebView alive to preserve the native history stack; do not close or delete it!
             continue;
           }
 
@@ -132,7 +134,7 @@ export const Viewport = ({
         }
 
         for (const session of sessions) {
-          const isCurrentlyActive = session.id === activeSessionId && !isPaletteOpen && appView === 'browser';
+          const isCurrentlyActive = session.id === activeSessionId && !isPaletteOpen && appView === 'browser' && session.url !== "";
           if (initializedWebviews.current.has(session.id)) {
             if (isCurrentlyActive) {
               await invoke("set_webview_bounds", {
@@ -191,6 +193,10 @@ export const Viewport = ({
   }, []);
 
   return (
-    <div ref={containerRef} className="absolute inset-0 bg-transparent flex items-center justify-center pointer-events-none z-0" />
+    <div 
+      ref={containerRef} 
+      className="absolute inset-0 bg-transparent flex items-center justify-center pointer-events-none z-0" 
+      style={{ colorScheme: isDarkMode ? 'dark' : 'light' }}
+    />
   );
 };

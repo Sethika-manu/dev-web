@@ -7,16 +7,14 @@ import { CommandPalette } from "./components/CommandPalette";
 import { Viewport } from "./components/Viewport";
 
 // Components
-import { Home } from "./components/Home"; 
+import { Home, recordSiteVisit } from "./components/Home"; 
 import { Settings } from "./components/Settings";
-import { Console } from "./components/Console";
 import { Downloads } from "./components/Downloads";
 
 // Lucide Icons
 import { 
   Download, 
   Home as HomeIcon, 
-  Terminal, 
   Settings as SettingsIcon,
   Layers,
   Copy,
@@ -87,7 +85,7 @@ export default function App() {
   
   const [searchValue, setSearchValue] = useState("");
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
-  const [appView, setAppView] = useState<'browser' | 'settings' | 'console' | 'downloads' | 'tabs'>('browser');
+  const [appView, setAppView] = useState<'browser' | 'settings' | 'downloads' | 'tabs'>('browser');
   
   const [toastMessage, setToastMessage] = useState<{title: string, desc: string} | null>(null);
   const [progressStates, setProgressStates] = useState<Record<string, number>>({});
@@ -113,6 +111,7 @@ export default function App() {
 
   const sessionsRef = useRef(sessions);
   const activeSessionIdRef = useRef(activeSessionId);
+  const appViewRef = useRef(appView);
   const lastLoadedUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -122,6 +121,10 @@ export default function App() {
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  useEffect(() => {
+    appViewRef.current = appView;
+  }, [appView]);
 
   useEffect(() => {
     const handleNativeContextMenu = (e: any) => {
@@ -173,10 +176,22 @@ export default function App() {
     if (isMobile) {
       (window as any).onNativeUrlChanged = (url: string) => {
         const currentActiveId = activeSessionIdRef.current;
+        const currentAppView = appViewRef.current;
+
+        // If we are not in the browser view (e.g. settings, downloads, tabs)
+        // and we receive a blank/empty callback from programmatic hiding,
+        // do NOT overwrite the preserved tab URL in state.
+        if (currentAppView !== 'browser' && (url === "" || url === "about:blank")) {
+          return;
+        }
+
         if (currentActiveId) {
           lastLoadedUrlRef.current = url;
           setSessions(prev => prev.map(s => s.id === currentActiveId ? { ...s, url, title: (url === "about:blank" || url === "") ? "New Tab" : url } : s));
           setSearchValue(url === "about:blank" ? "" : url);
+          if (url && url !== "" && url !== "about:blank") {
+            recordSiteVisit(url);
+          }
         }
       };
     }
@@ -188,27 +203,29 @@ export default function App() {
   const lastActiveId = useRef<string | null>(null);
   useEffect(() => {
     const syncTabSwitch = async () => {
-      if (isMobile && activeSessionId && activeSessionId !== lastActiveId.current) {
-        lastActiveId.current = activeSessionId;
-        const active = sessionsRef.current.find(s => s.id === activeSessionId);
-        if (active && active.url && active.url !== "about:blank" && active.url !== "") {
-          if (lastLoadedUrlRef.current !== active.url) {
-            lastLoadedUrlRef.current = active.url;
-            const win = window as any;
-            if (win.NativeBridge || win.AndroidBridge) {
-              (win.NativeBridge || win.AndroidBridge).loadNativeUrl(active.url);
+      if (isMobile) {
+        if (appView === 'browser' && activeSessionId) {
+          lastActiveId.current = activeSessionId;
+          const active = sessionsRef.current.find(s => s.id === activeSessionId);
+          if (active && active.url && active.url !== "about:blank" && active.url !== "") {
+            if (lastLoadedUrlRef.current !== active.url) {
+              lastLoadedUrlRef.current = active.url;
+              const win = window as any;
+              if (win.NativeBridge || win.AndroidBridge) {
+                (win.NativeBridge || win.AndroidBridge).loadNativeUrl(active.url);
+              }
             }
-          }
-        } else {
+          } else {
             const win = window as any;
             if (win.NativeBridge || win.AndroidBridge) {
               (win.NativeBridge || win.AndroidBridge).loadNativeUrl("");
             }
+          }
         }
       }
     };
     syncTabSwitch();
-  }, [activeSessionId, isMobile]);
+  }, [activeSessionId, isMobile, appView]);
 
   useEffect(() => {
     const checkForUpdates = async () => {
@@ -324,24 +341,43 @@ export default function App() {
     } else {
       setSearchValue("");
     }
-  }, [activeSessionId, activeSession?.url]);
+  }, [activeSessionId, activeSession?.url, appView]);
 
   const handleNavigate = async (url: string) => {
+    let targetUrl = url.trim();
+    if (targetUrl !== "" && targetUrl !== "about:blank") {
+      const isUrl = targetUrl.includes(".") && !targetUrl.includes(" ");
+      if (!targetUrl.startsWith("http") && isUrl) {
+        targetUrl = `https://${targetUrl}`;
+      } else if (!isUrl) {
+        targetUrl = `https://www.google.com/search?q=${encodeURIComponent(targetUrl)}`;
+      }
+    }
+
     if (!activeSessionId) {
-      handleCreateSession(url);
+      handleCreateSession(targetUrl);
       setAppView('browser');
       return;
     }
-    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, url, title: (url === "about:blank" || url === "") ? "New Tab" : url } : s));
-    setSearchValue(url);
+    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, url: targetUrl, title: (targetUrl === "about:blank" || targetUrl === "") ? "New Tab" : targetUrl } : s));
+    setSearchValue(targetUrl);
+
+    if (targetUrl && targetUrl !== "" && targetUrl !== "about:blank") {
+      recordSiteVisit(targetUrl);
+    }
 
     if (isMobile) {
-      if (lastLoadedUrlRef.current !== url) {
-        lastLoadedUrlRef.current = url;
+      if (lastLoadedUrlRef.current !== targetUrl) {
+        lastLoadedUrlRef.current = targetUrl;
         const win = window as any;
         if (win.NativeBridge || win.AndroidBridge) {
-          (win.NativeBridge || win.AndroidBridge).loadNativeUrl(url);
+          (win.NativeBridge || win.AndroidBridge).loadNativeUrl(targetUrl);
         }
+      }
+    } else {
+      if (targetUrl !== "" && targetUrl !== "about:blank") {
+        invoke("navigate_webview", { label: activeSessionId, url: targetUrl })
+          .catch((err) => console.warn("Failed to navigate on PC:", err));
       }
     }
   };
@@ -355,6 +391,10 @@ export default function App() {
     setSessions(prev => [...prev, newSession]);
     setActiveSessionId(newSession.id);
     setAppView('browser');
+
+    if (url && url !== "" && url !== "about:blank") {
+      recordSiteVisit(url);
+    }
 
     if (isMobile && url !== "") {
       if (lastLoadedUrlRef.current !== url) {
@@ -382,6 +422,7 @@ export default function App() {
     setSearchValue("");
     setAppView('browser');
     if (isMobile) {
+      lastLoadedUrlRef.current = null;
       const win = window as any;
       if (win.NativeBridge || win.AndroidBridge) {
         (win.NativeBridge || win.AndroidBridge).loadNativeUrl("");
@@ -389,9 +430,10 @@ export default function App() {
     }
   };
 
-  const handleNavClick = (view: 'settings' | 'console' | 'downloads' | 'tabs') => {
+  const handleNavClick = (view: 'settings' | 'downloads' | 'tabs') => {
     setAppView(view);
     if (isMobile) {
+      lastLoadedUrlRef.current = null;
       const win = window as any;
       if (win.NativeBridge || win.AndroidBridge) {
         (win.NativeBridge || win.AndroidBridge).loadNativeUrl("");
@@ -421,7 +463,7 @@ export default function App() {
     >
       <div 
         id="top-bar-container"
-        className="w-full bg-gray-900 dark:bg-gray-900 border-b border-white/5 flex-shrink-0 relative flex flex-col z-[50]"
+        className="w-full bg-white dark:bg-gray-900 border-b border-neutral-200 dark:border-white/5 flex-shrink-0 relative flex flex-col z-[50]"
         style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
         <TitleBar 
@@ -432,60 +474,64 @@ export default function App() {
         />
 
         <AnimatePresence>
-          {toastMessage && (
+          {(toastMessage && !isMobile) && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.3, ease: "easeInOut" }}
-              className="w-full bg-[#16161a] border-t border-white/10 text-neutral-200 overflow-hidden flex-shrink-0 flex items-center justify-between px-3 md:px-4 py-2 pointer-events-auto"
+              onUpdate={() => window.dispatchEvent(new Event('resize'))}
+              onAnimationComplete={() => window.dispatchEvent(new Event('resize'))}
+              className="w-full overflow-hidden flex-shrink-0 pointer-events-auto"
             >
-              <div className="flex items-center gap-2 md:gap-3 overflow-hidden w-full mr-2">
-                {(() => {
-                  const title = toastMessage.title.toLowerCase();
-                  if (title.includes('success')) {
+              <div className="relative z-[99999] flex items-center justify-between w-full py-2.5 px-4 bg-accent text-white shadow-md">
+                <div className="flex items-center gap-2 md:gap-3 overflow-hidden w-full mr-2">
+                  {(() => {
+                    const title = toastMessage.title.toLowerCase();
+                    if (title.includes('success')) {
+                      return (
+                        <div className="bg-emerald-500/20 text-emerald-300 p-1 md:p-1.5 rounded-lg flex-shrink-0 flex items-center justify-center border border-emerald-500/30">
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                        </div>
+                      );
+                    }
+                    if (title.includes('fail') || title.includes('error')) {
+                      return (
+                        <div className="bg-rose-500/20 text-rose-300 p-1 md:p-1.5 rounded-lg flex-shrink-0 flex items-center justify-center border border-rose-500/30">
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                        </div>
+                      );
+                    }
+                    if (title.includes('copy')) {
+                      return (
+                        <div className="bg-amber-500/20 text-amber-300 p-1 md:p-1.5 rounded-lg flex-shrink-0 flex items-center justify-center border border-amber-500/30">
+                          <Copy size={14} />
+                        </div>
+                      );
+                    }
                     return (
-                      <div className="bg-emerald-500/10 text-emerald-400 p-1 md:p-1.5 rounded-lg flex-shrink-0 flex items-center justify-center border border-emerald-500/20">
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                      <div className="bg-blue-500/20 text-blue-300 p-1 md:p-1.5 rounded-lg flex-shrink-0 flex items-center justify-center border border-blue-500/30">
+                        <Download size={14} className="animate-bounce" />
                       </div>
                     );
-                  }
-                  if (title.includes('fail') || title.includes('error')) {
-                    return (
-                      <div className="bg-rose-500/10 text-rose-400 p-1 md:p-1.5 rounded-lg flex-shrink-0 flex items-center justify-center border border-rose-500/20">
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                      </div>
-                    );
-                  }
-                  if (title.includes('copy')) {
-                    return (
-                      <div className="bg-amber-500/10 text-amber-400 p-1 md:p-1.5 rounded-lg flex-shrink-0 flex items-center justify-center border border-amber-500/20">
-                        <Copy size={14} />
-                      </div>
-                    );
-                  }
-                  return (
-                    <div className="bg-blue-500/10 text-blue-400 p-1 md:p-1.5 rounded-lg flex-shrink-0 flex items-center justify-center border border-blue-500/20">
-                      <Download size={14} className="animate-bounce" />
-                    </div>
-                  );
-                })()}
-                <div className="flex flex-col md:flex-row md:items-baseline gap-0.5 md:gap-2 overflow-hidden text-[11px] md:text-sm">
-                  <span className="font-bold text-neutral-100 tracking-wide flex-shrink-0">{toastMessage.title}</span>
-                  <span className="text-neutral-400 truncate font-medium text-[10px] md:text-xs">{toastMessage.desc}</span>
+                  })()}
+                  <div className="flex flex-col md:flex-row md:items-baseline gap-0.5 md:gap-2 overflow-hidden text-[11px] md:text-sm">
+                    <span className="font-bold text-white tracking-wide flex-shrink-0">{toastMessage.title}</span>
+                    <span className="text-white/80 truncate font-medium text-[10px] md:text-xs">{toastMessage.desc}</span>
+                  </div>
                 </div>
-              </div>
 
-              <button 
-                onClick={() => setToastMessage(null)}
-                className="p-1 rounded-lg text-neutral-400 hover:text-neutral-100 hover:bg-white/5 transition-colors flex-shrink-0 cursor-pointer pointer-events-auto"
-                aria-label="Close notification"
-              >
-                <svg className="w-3.5 h-3.5 md:w-4 md:h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
+                <button 
+                  onClick={() => setToastMessage(null)}
+                  className="p-1 rounded-lg text-white/85 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0 cursor-pointer pointer-events-auto"
+                  aria-label="Close notification"
+                >
+                  <svg className="w-3.5 h-3.5 md:w-4 md:h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -516,7 +562,6 @@ export default function App() {
             onHomeClick={handleGoHome}
             onSearchClick={() => setIsPaletteOpen(true)}
             onSettingsClick={() => handleNavClick('settings')}
-            onConsoleClick={() => handleNavClick('console')}
             onDownloadsClick={() => handleNavClick('downloads')}
             activeView={appView}
             isDownloading={activeDownloads.length > 0} 
@@ -531,7 +576,6 @@ export default function App() {
           <div className="absolute inset-0 z-10 pointer-events-none">
             {(() => {
               if (appView === 'settings') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Settings /></div>;
-              if (appView === 'console') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Console /></div>;
               if (appView === 'downloads') return (
                 <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto">
                   <Downloads activeDownloads={activeDownloads} history={downloadHistory} clearHistory={() => { setDownloadHistory([]); localStorage.removeItem('rc_download_history'); }} />
@@ -710,10 +754,68 @@ export default function App() {
       </AnimatePresence>
 
       {/* Bottom Footer Section */}
-      <div id="bottom-bar-container" className="flex-shrink-0 w-full z-[99999] relative bg-gray-900 dark:bg-gray-900">
+      <div id="bottom-bar-container" className="flex-shrink-0 w-full z-[99999] relative bg-white dark:bg-gray-900 border-t border-neutral-200 dark:border-neutral-800/80">
+        <AnimatePresence>
+          {(toastMessage && isMobile) && (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 15 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="absolute inset-0 z-[999999] flex items-center justify-between px-4 bg-[#2563eb] text-white pointer-events-auto"
+            >
+              <div className="flex items-center gap-2 overflow-hidden w-full mr-2">
+                {(() => {
+                  const title = toastMessage.title.toLowerCase();
+                  if (title.includes('success')) {
+                    return (
+                      <div className="bg-emerald-500/20 text-emerald-300 p-1 rounded-lg flex-shrink-0 flex items-center justify-center border border-emerald-500/30">
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                      </div>
+                    );
+                  }
+                  if (title.includes('fail') || title.includes('error')) {
+                    return (
+                      <div className="bg-rose-500/20 text-rose-300 p-1 rounded-lg flex-shrink-0 flex items-center justify-center border border-rose-500/30">
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                      </div>
+                    );
+                  }
+                  if (title.includes('copy')) {
+                    return (
+                      <div className="bg-amber-500/20 text-amber-300 p-1 rounded-lg flex-shrink-0 flex items-center justify-center border border-amber-500/30">
+                        <Copy size={14} />
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="bg-blue-500/20 text-blue-300 p-1 rounded-lg flex-shrink-0 flex items-center justify-center border border-blue-500/30">
+                      <Download size={14} className="animate-bounce" />
+                    </div>
+                  );
+                })()}
+                <div className="flex flex-col gap-0.5 overflow-hidden text-[11px]">
+                  <span className="font-bold text-white tracking-wide flex-shrink-0">{toastMessage.title}</span>
+                  <span className="text-white/80 truncate font-medium text-[10px]">{toastMessage.desc}</span>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => setToastMessage(null)}
+                className="p-1 rounded-lg text-white/85 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0 cursor-pointer pointer-events-auto"
+                aria-label="Close notification"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <nav 
-          className="md:hidden w-full h-[calc(68px+env(safe-area-inset-bottom,0px))] bg-gray-900 dark:bg-gray-900 border-t border-neutral-200 dark:border-neutral-800/80 flex items-center justify-around px-2"
-          style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+          className="md:hidden w-full h-[110px] bg-white dark:bg-gray-900 flex items-center justify-around px-2 pb-[env(safe-area-inset-bottom,0px)]"
         >
           <button onClick={handleGoHome} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
             <HomeIcon size={20} className="mb-1" /><span>Home</span>
@@ -721,15 +823,12 @@ export default function App() {
           <button onClick={() => handleNavClick('tabs')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors relative">
             <div className="relative mb-1">
               <Layers size={20} />
-              {sessions.length > 0 && <span className="absolute -top-1.5 -right-2 bg-accent text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-[#0c0c0c] dark:border-[#0c0c0c]">{sessions.length}</span>}
+              {sessions.length > 0 && <span className="absolute -top-1.5 -right-2 bg-accent text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-white dark:border-[#0c0c0c]">{sessions.length}</span>}
             </div>
             <span>Tabs</span>
           </button>
           <button onClick={() => handleNavClick('downloads')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
             <Download size={20} className="mb-1" /><span>Downloads</span>
-          </button>
-          <button onClick={() => handleNavClick('console')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors mobile-nav-console">
-            <Terminal size={20} className="mb-1" /><span>Console</span>
           </button>
           <button onClick={() => handleNavClick('settings')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
             <SettingsIcon size={20} className="mb-1" /><span>Settings</span>

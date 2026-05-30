@@ -4,7 +4,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useSettings } from "./SettingsContext";
 import { 
   Globe, 
-  Terminal, 
   Layout, 
   Settings, 
   ChevronLeft, 
@@ -27,14 +26,13 @@ interface Session {
 interface SidebarProps {
   sessions: Session[];
   activeSessionId: string | null;
-  activeView: 'browser' | 'settings' | 'console' | 'downloads' | 'tabs';
+  activeView: 'browser' | 'settings' | 'downloads' | 'tabs';
   onSessionSelect: (id: string) => void;
   onSessionClose: (id: string) => void;
   onNewSession: () => void;
   onHomeClick: () => void;
   onSearchClick: () => void;
   onSettingsClick: () => void;
-  onConsoleClick: () => void;
   onDownloadsClick: () => void;
   isDownloading: boolean;
 }
@@ -49,7 +47,6 @@ export const Sidebar = ({
   onHomeClick,
   onSearchClick,
   onSettingsClick,
-  onConsoleClick,
   onDownloadsClick,
   isDownloading
 }: SidebarProps) => {
@@ -95,7 +92,7 @@ export const Sidebar = ({
             onClick={onHomeClick}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            {t('nav_projects')}
+            {t('nav_home')}
           </span>
         )}
         <button
@@ -175,18 +172,6 @@ export const Sidebar = ({
             {!isCollapsed && <span className="text-xs font-medium">Downloads</span>}
           </button>
 
-          <button 
-            onClick={onConsoleClick}
-            className={cn(
-              "w-full flex items-center gap-3 p-2.5 rounded-lg transition-all whitespace-nowrap",
-              activeView === 'console'
-                ? "bg-blue-500/10 text-blue-500 shadow-sm shadow-blue-500/5 border border-blue-500/20"
-                : "text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-white/[0.02]"
-            )}
-          >
-            <div className="flex-shrink-0"><Terminal size={16} className={cn(activeView === 'console' && "drop-shadow-[0_0_5px_rgba(59,130,246,0.5)]")} /></div>
-            {!isCollapsed && <span className="text-xs font-medium">{t('nav_console')}</span>}
-          </button>
 
           <button 
             onClick={onSettingsClick}

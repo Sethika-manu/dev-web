@@ -22,10 +22,15 @@ import android.os.Environment
 import android.util.Base64
 import android.content.ContentValues
 import android.provider.MediaStore
+import android.widget.Toast
+import android.webkit.URLUtil
+import android.webkit.DownloadListener
 
 class MainActivity : TauriActivity() {
     private var tauriWebView: WebView? = null
     var nativeWebView: WebView? = null
+    private var customView: View? = null
+    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
 
     @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     override fun onWebViewCreate(webView: WebView) {
@@ -49,7 +54,56 @@ class MainActivity : TauriActivity() {
                     displayZoomControls = false
                 }
 
-                webChromeClient = WebChromeClient()
+                webChromeClient = object : WebChromeClient() {
+                    override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                        super.onShowCustomView(view, callback)
+                        if (customView != null) {
+                            callback?.onCustomViewHidden()
+                            return
+                        }
+                        
+                        customView = view
+                        customViewCallback = callback
+                        
+                        // Hide standard UI/WebView
+                        this@apply.visibility = View.GONE
+                        
+                        // Add custom view to root view
+                        val decor = window.decorView as FrameLayout
+                        decor.addView(view, FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT
+                        ))
+                        
+                        // Set immersive fullscreen flags
+                        @Suppress("DEPRECATION")
+                        window.decorView.systemUiVisibility = (
+                            View.SYSTEM_UI_FLAG_FULLSCREEN or
+                            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        )
+                    }
+
+                    override fun onHideCustomView() {
+                        super.onHideCustomView()
+                        if (customView == null) return
+                        
+                        // Remove custom view from root view
+                        val decor = window.decorView as FrameLayout
+                        decor.removeView(customView)
+                        customView = null
+                        
+                        // Restore original WebView visibility
+                        this@apply.visibility = View.VISIBLE
+                        
+                        // Restore system UI visibility flags
+                        @Suppress("DEPRECATION")
+                        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+                        
+                        customViewCallback?.onCustomViewHidden()
+                        customViewCallback = null
+                    }
+                }
                 webViewClient = object : WebViewClient() {
                     override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
                         super.doUpdateVisitedHistory(view, url, isReload)
@@ -58,6 +112,37 @@ class MainActivity : TauriActivity() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         url?.let { syncUrlToReact(it) }
+                    }
+                }
+
+                setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
+                    val fileName = URLUtil.guessFileName(url, contentDisposition, mimetype)
+                    val extension = fileName.substringAfterLast('.', "").lowercase()
+
+                    val blacklist = setOf("sh", "bat", "cmd", "vbs", "exe", "bin")
+
+                    if (blacklist.contains(extension)) {
+                        Toast.makeText(this@MainActivity, "Download blocked: Potentially harmful file.", Toast.LENGTH_LONG).show()
+                        return@setDownloadListener
+                    }
+
+                    try {
+                        val request = DownloadManager.Request(Uri.parse(url)).apply {
+                            setMimeType(mimetype)
+                            @Suppress("DEPRECATION")
+                            allowScanningByMediaScanner()
+                            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                            setTitle(fileName)
+                            setDescription("Downloading file...")
+                            addRequestHeader("User-Agent", userAgent)
+                        }
+
+                        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                        dm.enqueue(request)
+                        Toast.makeText(this@MainActivity, "Download started...", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(this@MainActivity, "Download failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
                     }
                 }
 
