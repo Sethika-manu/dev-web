@@ -1,14 +1,14 @@
 {
-  "version": "1.3.1",
+  "version": "1.3.2",
   "notes": "Bug fixes, super fast loading bars, and sidebar adjustments!",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRblg1c2pQL3FCWGxxYktSeGYydngyTVpKaStOamFjQ05CckVzcVBjR29nb2lMWEZtZU9oOXRSbGF2RE5tZmtmekd6N0VoSXVYNzBvajZZTnFVdy81Yzk2VitJaXB0WUE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgwMTU3MTE1CWZpbGU6UkNCcm93c2VyXzEuMy4xX3g2NC1zZXR1cC5leGUKekZ3bkJ1Y3R0MTR1ZStGVXhpeTJzQ2M0YjNqU2FaUEVsNkNnOTJEVGh0azU3T0JKeUtVMFphejRnUVpQdGlPc0VSM2FEMnl0STVxODVYUlZOQkx1QWc9PQo=",
-      "url": "https://github.com/Sethika-manu/dev-web/releases/download/v1.3.1/RCBrowser_1.3.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRblg1c2pQL3FCWGp1aXNGZ2VmZVd1bDUwUmRZbzVxUjdPeExkUU90SlVVeFVQMGlXZXBqSG5aWEtWQlZMdmZidTFTUDBEU1VSUGdRVi9sK2RORDJhMHk0YVQ0L3MvdXdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgwMTU3ODc1CWZpbGU6UkNCcm93c2VyXzEuMy4yX3g2NC1zZXR1cC5leGUKeGtkcGpFR2xZU2x1bXI1Z0VwNmdOWlhpOW5DNTBoRjIzVGlSWDI3eGJvakFhSlY5UzNwdnpMRkNGRVp4ZXo5aE9LWVFqL2ZWR1hPQmlDbkNvSjJ5QlE9PQo=",
+      "url": "https://github.com/Sethika-manu/dev-web/releases/download/v1.3.2/RCBrowser_1.3.2_x64-setup.exe"
     },
     "android": {
       "signature": "",
-      "url": "https://github.com/Sethika-manu/dev-web/releases/download/v1.3.1/RCBrowserv1.3.1.apk"
+      "url": "https://github.com/Sethika-manu/dev-web/releases/download/v1.3.2/RCBrowserv1.3.2.apk"
     }
   }
 }
