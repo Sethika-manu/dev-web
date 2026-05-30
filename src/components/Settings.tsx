@@ -16,6 +16,8 @@ import { motion } from "framer-motion";
 import { useSettings } from "./SettingsContext";
 import { getVersion } from "@tauri-apps/api/app";
 
+declare const __BUILD_DATE__: string;
+
 type Language = 'English (US)' | 'Sinhala (LK)' | 'Singlish';
 
 const TRANSLATIONS: Record<Language, any> = {

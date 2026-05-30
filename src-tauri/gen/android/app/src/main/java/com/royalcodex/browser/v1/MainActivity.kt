@@ -22,6 +22,9 @@ import android.os.Environment
 import android.util.Base64
 import android.content.ContentValues
 import android.provider.MediaStore
+import android.widget.Toast
+import android.webkit.URLUtil
+import android.webkit.DownloadListener
 
 class MainActivity : TauriActivity() {
     private var tauriWebView: WebView? = null
@@ -109,6 +112,37 @@ class MainActivity : TauriActivity() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         url?.let { syncUrlToReact(it) }
+                    }
+                }
+
+                setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
+                    val fileName = URLUtil.guessFileName(url, contentDisposition, mimetype)
+                    val extension = fileName.substringAfterLast('.', "").lowercase()
+
+                    val blacklist = setOf("sh", "bat", "cmd", "vbs", "exe", "bin")
+
+                    if (blacklist.contains(extension)) {
+                        Toast.makeText(this@MainActivity, "Download blocked: Potentially harmful file.", Toast.LENGTH_LONG).show()
+                        return@setDownloadListener
+                    }
+
+                    try {
+                        val request = DownloadManager.Request(Uri.parse(url)).apply {
+                            setMimeType(mimetype)
+                            @Suppress("DEPRECATION")
+                            allowScanningByMediaScanner()
+                            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                            setTitle(fileName)
+                            setDescription("Downloading file...")
+                            addRequestHeader("User-Agent", userAgent)
+                        }
+
+                        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                        dm.enqueue(request)
+                        Toast.makeText(this@MainActivity, "Download started...", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(this@MainActivity, "Download failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
                     }
                 }
 

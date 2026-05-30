@@ -9,14 +9,12 @@ import { Viewport } from "./components/Viewport";
 // Components
 import { Home, recordSiteVisit } from "./components/Home"; 
 import { Settings } from "./components/Settings";
-import { Console } from "./components/Console";
 import { Downloads } from "./components/Downloads";
 
 // Lucide Icons
 import { 
   Download, 
   Home as HomeIcon, 
-  Terminal, 
   Settings as SettingsIcon,
   Layers,
   Copy,
@@ -87,7 +85,7 @@ export default function App() {
   
   const [searchValue, setSearchValue] = useState("");
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
-  const [appView, setAppView] = useState<'browser' | 'settings' | 'console' | 'downloads' | 'tabs'>('browser');
+  const [appView, setAppView] = useState<'browser' | 'settings' | 'downloads' | 'tabs'>('browser');
   
   const [toastMessage, setToastMessage] = useState<{title: string, desc: string} | null>(null);
   const [progressStates, setProgressStates] = useState<Record<string, number>>({});
@@ -113,6 +111,7 @@ export default function App() {
 
   const sessionsRef = useRef(sessions);
   const activeSessionIdRef = useRef(activeSessionId);
+  const appViewRef = useRef(appView);
   const lastLoadedUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -122,6 +121,10 @@ export default function App() {
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  useEffect(() => {
+    appViewRef.current = appView;
+  }, [appView]);
 
   useEffect(() => {
     const handleNativeContextMenu = (e: any) => {
@@ -173,6 +176,15 @@ export default function App() {
     if (isMobile) {
       (window as any).onNativeUrlChanged = (url: string) => {
         const currentActiveId = activeSessionIdRef.current;
+        const currentAppView = appViewRef.current;
+
+        // If we are not in the browser view (e.g. settings, downloads, tabs)
+        // and we receive a blank/empty callback from programmatic hiding,
+        // do NOT overwrite the preserved tab URL in state.
+        if (currentAppView !== 'browser' && (url === "" || url === "about:blank")) {
+          return;
+        }
+
         if (currentActiveId) {
           lastLoadedUrlRef.current = url;
           setSessions(prev => prev.map(s => s.id === currentActiveId ? { ...s, url, title: (url === "about:blank" || url === "") ? "New Tab" : url } : s));
@@ -191,27 +203,29 @@ export default function App() {
   const lastActiveId = useRef<string | null>(null);
   useEffect(() => {
     const syncTabSwitch = async () => {
-      if (isMobile && activeSessionId && activeSessionId !== lastActiveId.current) {
-        lastActiveId.current = activeSessionId;
-        const active = sessionsRef.current.find(s => s.id === activeSessionId);
-        if (active && active.url && active.url !== "about:blank" && active.url !== "") {
-          if (lastLoadedUrlRef.current !== active.url) {
-            lastLoadedUrlRef.current = active.url;
-            const win = window as any;
-            if (win.NativeBridge || win.AndroidBridge) {
-              (win.NativeBridge || win.AndroidBridge).loadNativeUrl(active.url);
+      if (isMobile) {
+        if (appView === 'browser' && activeSessionId) {
+          lastActiveId.current = activeSessionId;
+          const active = sessionsRef.current.find(s => s.id === activeSessionId);
+          if (active && active.url && active.url !== "about:blank" && active.url !== "") {
+            if (lastLoadedUrlRef.current !== active.url) {
+              lastLoadedUrlRef.current = active.url;
+              const win = window as any;
+              if (win.NativeBridge || win.AndroidBridge) {
+                (win.NativeBridge || win.AndroidBridge).loadNativeUrl(active.url);
+              }
             }
-          }
-        } else {
+          } else {
             const win = window as any;
             if (win.NativeBridge || win.AndroidBridge) {
               (win.NativeBridge || win.AndroidBridge).loadNativeUrl("");
             }
+          }
         }
       }
     };
     syncTabSwitch();
-  }, [activeSessionId, isMobile]);
+  }, [activeSessionId, isMobile, appView]);
 
   useEffect(() => {
     const checkForUpdates = async () => {
@@ -327,28 +341,43 @@ export default function App() {
     } else {
       setSearchValue("");
     }
-  }, [activeSessionId, activeSession?.url]);
+  }, [activeSessionId, activeSession?.url, appView]);
 
   const handleNavigate = async (url: string) => {
+    let targetUrl = url.trim();
+    if (targetUrl !== "" && targetUrl !== "about:blank") {
+      const isUrl = targetUrl.includes(".") && !targetUrl.includes(" ");
+      if (!targetUrl.startsWith("http") && isUrl) {
+        targetUrl = `https://${targetUrl}`;
+      } else if (!isUrl) {
+        targetUrl = `https://www.google.com/search?q=${encodeURIComponent(targetUrl)}`;
+      }
+    }
+
     if (!activeSessionId) {
-      handleCreateSession(url);
+      handleCreateSession(targetUrl);
       setAppView('browser');
       return;
     }
-    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, url, title: (url === "about:blank" || url === "") ? "New Tab" : url } : s));
-    setSearchValue(url);
+    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, url: targetUrl, title: (targetUrl === "about:blank" || targetUrl === "") ? "New Tab" : targetUrl } : s));
+    setSearchValue(targetUrl);
 
-    if (url && url !== "" && url !== "about:blank") {
-      recordSiteVisit(url);
+    if (targetUrl && targetUrl !== "" && targetUrl !== "about:blank") {
+      recordSiteVisit(targetUrl);
     }
 
     if (isMobile) {
-      if (lastLoadedUrlRef.current !== url) {
-        lastLoadedUrlRef.current = url;
+      if (lastLoadedUrlRef.current !== targetUrl) {
+        lastLoadedUrlRef.current = targetUrl;
         const win = window as any;
         if (win.NativeBridge || win.AndroidBridge) {
-          (win.NativeBridge || win.AndroidBridge).loadNativeUrl(url);
+          (win.NativeBridge || win.AndroidBridge).loadNativeUrl(targetUrl);
         }
+      }
+    } else {
+      if (targetUrl !== "" && targetUrl !== "about:blank") {
+        invoke("navigate_webview", { label: activeSessionId, url: targetUrl })
+          .catch((err) => console.warn("Failed to navigate on PC:", err));
       }
     }
   };
@@ -393,6 +422,7 @@ export default function App() {
     setSearchValue("");
     setAppView('browser');
     if (isMobile) {
+      lastLoadedUrlRef.current = null;
       const win = window as any;
       if (win.NativeBridge || win.AndroidBridge) {
         (win.NativeBridge || win.AndroidBridge).loadNativeUrl("");
@@ -400,9 +430,10 @@ export default function App() {
     }
   };
 
-  const handleNavClick = (view: 'settings' | 'console' | 'downloads' | 'tabs') => {
+  const handleNavClick = (view: 'settings' | 'downloads' | 'tabs') => {
     setAppView(view);
     if (isMobile) {
+      lastLoadedUrlRef.current = null;
       const win = window as any;
       if (win.NativeBridge || win.AndroidBridge) {
         (win.NativeBridge || win.AndroidBridge).loadNativeUrl("");
@@ -531,7 +562,6 @@ export default function App() {
             onHomeClick={handleGoHome}
             onSearchClick={() => setIsPaletteOpen(true)}
             onSettingsClick={() => handleNavClick('settings')}
-            onConsoleClick={() => handleNavClick('console')}
             onDownloadsClick={() => handleNavClick('downloads')}
             activeView={appView}
             isDownloading={activeDownloads.length > 0} 
@@ -546,7 +576,6 @@ export default function App() {
           <div className="absolute inset-0 z-10 pointer-events-none">
             {(() => {
               if (appView === 'settings') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Settings /></div>;
-              if (appView === 'console') return <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto"><Console /></div>;
               if (appView === 'downloads') return (
                 <div className="absolute inset-0 z-20 bg-white dark:bg-[#0a0a0a] pointer-events-auto">
                   <Downloads activeDownloads={activeDownloads} history={downloadHistory} clearHistory={() => { setDownloadHistory([]); localStorage.removeItem('rc_download_history'); }} />
@@ -800,9 +829,6 @@ export default function App() {
           </button>
           <button onClick={() => handleNavClick('downloads')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
             <Download size={20} className="mb-1" /><span>Downloads</span>
-          </button>
-          <button onClick={() => handleNavClick('console')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors mobile-nav-console">
-            <Terminal size={20} className="mb-1" /><span>Console</span>
           </button>
           <button onClick={() => handleNavClick('settings')} className="flex flex-col items-center justify-center w-full h-full text-xs text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
             <SettingsIcon size={20} className="mb-1" /><span>Settings</span>
