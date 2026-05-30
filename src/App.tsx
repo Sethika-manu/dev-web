@@ -7,7 +7,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { Viewport } from "./components/Viewport";
 
 // Components
-import { Home } from "./components/Home"; 
+import { Home, recordSiteVisit } from "./components/Home"; 
 import { Settings } from "./components/Settings";
 import { Console } from "./components/Console";
 import { Downloads } from "./components/Downloads";
@@ -177,6 +177,9 @@ export default function App() {
           lastLoadedUrlRef.current = url;
           setSessions(prev => prev.map(s => s.id === currentActiveId ? { ...s, url, title: (url === "about:blank" || url === "") ? "New Tab" : url } : s));
           setSearchValue(url === "about:blank" ? "" : url);
+          if (url && url !== "" && url !== "about:blank") {
+            recordSiteVisit(url);
+          }
         }
       };
     }
@@ -335,6 +338,10 @@ export default function App() {
     setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, url, title: (url === "about:blank" || url === "") ? "New Tab" : url } : s));
     setSearchValue(url);
 
+    if (url && url !== "" && url !== "about:blank") {
+      recordSiteVisit(url);
+    }
+
     if (isMobile) {
       if (lastLoadedUrlRef.current !== url) {
         lastLoadedUrlRef.current = url;
@@ -355,6 +362,10 @@ export default function App() {
     setSessions(prev => [...prev, newSession]);
     setActiveSessionId(newSession.id);
     setAppView('browser');
+
+    if (url && url !== "" && url !== "about:blank") {
+      recordSiteVisit(url);
+    }
 
     if (isMobile && url !== "") {
       if (lastLoadedUrlRef.current !== url) {

@@ -80,10 +80,7 @@ export const Viewport = ({
         for (const session of sessions) {
           const hasBeenInitialized = initializedWebviews.current.has(session.id);
           if (session.url === "") {
-            if (hasBeenInitialized) {
-              await invoke("close_webview", { label: session.id }).catch((e) => console.warn("Close Error:", e));
-              initializedWebviews.current.delete(session.id);
-            }
+            // Keep the WebView alive to preserve the native history stack; do not close or delete it!
             continue;
           }
 
@@ -137,7 +134,7 @@ export const Viewport = ({
         }
 
         for (const session of sessions) {
-          const isCurrentlyActive = session.id === activeSessionId && !isPaletteOpen && appView === 'browser';
+          const isCurrentlyActive = session.id === activeSessionId && !isPaletteOpen && appView === 'browser' && session.url !== "";
           if (initializedWebviews.current.has(session.id)) {
             if (isCurrentlyActive) {
               await invoke("set_webview_bounds", {

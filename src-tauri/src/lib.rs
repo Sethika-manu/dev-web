@@ -233,9 +233,9 @@ async fn open_webview(
 
         if let Some(webview) = app.get_webview(&label) {
             let js = if theme == "dark" {
-                "document.documentElement.classList.add('dark'); document.documentElement.style.colorScheme = 'dark';"
+                "document.documentElement.classList.add('dark');"
             } else {
-                "document.documentElement.classList.remove('dark'); document.documentElement.style.colorScheme = 'light';"
+                "document.documentElement.classList.remove('dark');"
             };
             let _ = webview.eval(js);
         }
@@ -353,9 +353,9 @@ async fn set_webview_theme(app: AppHandle, label: String, theme: String) -> Resu
     {
         if let Some(webview) = app.get_webview(&label) {
             let js = if theme == "dark" {
-                "document.documentElement.classList.add('dark'); document.documentElement.style.colorScheme = 'dark';"
+                "document.documentElement.classList.add('dark');"
             } else {
-                "document.documentElement.classList.remove('dark'); document.documentElement.style.colorScheme = 'light';"
+                "document.documentElement.classList.remove('dark');"
             };
             let _ = webview.eval(js);
         }
@@ -486,27 +486,6 @@ pub fn run() {
             #[cfg(mobile)]
             let handle = app.handle().clone();
             
-            #[cfg(desktop)]
-            let handle_theme = app.handle().clone();
-            
-            #[cfg(desktop)]
-            app.listen("theme-toggle", move |event| {
-                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
-                    if let Some(theme) = payload.get("theme").and_then(|v| v.as_str()) {
-                        let js = if theme == "dark" {
-                            "document.documentElement.classList.add('dark'); document.documentElement.style.colorScheme = 'dark';"
-                        } else {
-                            "document.documentElement.classList.remove('dark'); document.documentElement.style.colorScheme = 'light';"
-                        };
-                        for (label, webview) in handle_theme.webviews() {
-                            if label != "main" && label != "main_window" {
-                                let _ = webview.eval(js);
-                            }
-                        }
-                    }
-                }
-            });
-
             app.listen("load_native_url", move |event| {
                 #[cfg(mobile)]
                 {
