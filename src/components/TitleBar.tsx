@@ -241,11 +241,19 @@ export const TitleBar = ({ onNavigate, searchValue, onSearchChange, activeSessio
   const handleReload = async () => {
     if (activeSessionId) {
       const win = window as any;
-      if (isMobile && (win.NativeBridge || win.AndroidBridge)) {
-        // Android Bridge එකට Reload කමාන්ඩ් එක දෙනවා
-        (win.NativeBridge || win.AndroidBridge).reload();
+      if (isMobile) {
+        const bridge = win.AndroidBridge || win.NativeBridge;
+        if (bridge) {
+          if (typeof bridge.reloadWebview === "function") {
+            bridge.reloadWebview();
+          } else if (typeof bridge.reload === "function") {
+            bridge.reload();
+          }
+        }
       } else {
-        console.warn("Native bridge not found for reload");
+        await invoke("reload_webview", { label: activeSessionId }).catch((err) => {
+          console.warn("Failed to reload PC webview:", err);
+        });
       }
     }
   };

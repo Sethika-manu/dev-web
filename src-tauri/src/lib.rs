@@ -18,6 +18,8 @@ struct SystemMetrics {
 
 struct SystemState(std::sync::Mutex<sysinfo::System>);
 
+struct PrivacyState(std::sync::atomic::AtomicBool);
+
 fn get_ping() -> u64 {
     let start = Instant::now();
     let addr = "1.1.1.1:53".parse::<SocketAddr>().unwrap();
@@ -44,6 +46,80 @@ fn decode_hex(hex_str: &str) -> String {
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+fn get_adblock_engine() -> &'static adblock::engine::Engine {
+    use adblock::engine::Engine;
+    use adblock::lists::{FilterSet, ParseOptions};
+    use std::sync::OnceLock;
+
+    static ADBLOCK_ENGINE: OnceLock<Engine> = OnceLock::new();
+
+    ADBLOCK_ENGINE.get_or_init(|| {
+        let rules_data = include_str!("easylist.txt");
+        let mut filter_set = FilterSet::new(true);
+        let parse_options = ParseOptions {
+            ..Default::default()
+        };
+        
+        for line in rules_data.lines() {
+            let line_trimmed = line.trim();
+            if !line_trimmed.is_empty() && !line_trimmed.starts_with('!') {
+                let _ = filter_set.add_filter(line_trimmed, parse_options.clone());
+            }
+        }
+        
+        Engine::from_filter_set(filter_set, true)
+    })
+}
+
+fn is_ad_or_tracker_rust(url_str: &str) -> bool {
+    use adblock::request::Request;
+
+    let engine = get_adblock_engine();
+
+    if let Ok(request) = Request::new(url_str, "http://example.com", "other") {
+        let blocker_result = engine.check_network_request(&request);
+        blocker_result.matched
+    } else {
+        false
+    }
+}
+
+#[tauri::command]
+fn get_cosmetic_rules(state: tauri::State<'_, PrivacyState>, url: String) -> String {
+    if !state.0.load(std::sync::atomic::Ordering::Relaxed) {
+        return "".to_string();
+    }
+    let engine = get_adblock_engine();
+    let resources = engine.url_cosmetic_resources(&url);
+    let selectors: Vec<String> = resources.hide_selectors.into_iter().collect();
+    if selectors.is_empty() {
+        "".to_string()
+    } else {
+        format!(
+            "{} {{ display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; width: 0 !important; pointer-events: none !important; }}",
+            selectors.join(", ")
+        )
+    }
+}
+
+#[tauri::command]
+async fn set_privacy_shield(
+    app: AppHandle,
+    state: tauri::State<'_, PrivacyState>,
+    enabled: bool,
+) -> Result<(), String> {
+    state.0.store(enabled, std::sync::atomic::Ordering::Relaxed);
+
+    // Evaluate JS in all open webviews to dynamically sync the state!
+    let webviews = app.webviews();
+    let js = format!("window.__privacyShieldOn = {};", enabled);
+    for (_, webview) in webviews {
+        let _ = webview.eval(&js);
+    }
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -85,8 +161,287 @@ async fn open_webview(
             return Ok(());
         }
 
+        let privacy_shield_on = app.state::<PrivacyState>().0.load(std::sync::atomic::Ordering::Relaxed);
+        
+        let mut initial_cosmetic_css = String::new();
+        if privacy_shield_on {
+            let engine = get_adblock_engine();
+            let resources = engine.url_cosmetic_resources(url_data.as_str());
+            let selectors: Vec<String> = resources.hide_selectors.into_iter().collect();
+            if !selectors.is_empty() {
+                initial_cosmetic_css = format!(
+                    "{} {{ display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; width: 0 !important; pointer-events: none !important; }}",
+                    selectors.join(", ")
+                );
+            }
+        }
+
         let mut webview_builder =
             WebviewBuilder::new(&label, tauri::WebviewUrl::External(url_data));
+
+        webview_builder = webview_builder.initialization_script(&format!(
+            r#"
+            (function() {{
+                window.__privacyShieldOn = {};
+                const initialCosmeticCss = {};
+                
+                const adPatterns = [
+                    "doubleclick", "googlesyndication", "googletagmanager", "googletagservices",
+                    "google-analytics", "adservice.google", "quantserve", "quantcast",
+                    "scorecardresearch", "criteo", "taboola", "outbrain", "amazon-adsystem",
+                    "popads", "popcash", "adnxs", "adcolony", "unityads", "applovin",
+                    "ironsrc", "hotjar", "optimizely", "crazyegg", "mixpanel", "bugsnag",
+                    "sentry.io", "flurry", "chartbeat", "newrelic", "casalemedia",
+                    "rubiconproject", "pubmatic", "openx", "sovrn", "triplelift",
+                    "smartadserver", "bidswitch", "bluekai", "liveramp", "lotame",
+                    "teads.tv", "thetradedesk", "appnexus", "adroll", "moatads",
+                    "integralads", "doubleverify", "appsflyer", "adjust", "onesignal",
+                    "clarity.ms", "yandexmetrika", "yandex.ru", "clickcease", "adform",
+                    "adsystem", "adtarget", "yieldmo", "indexww", "adobedtm",
+                    "omtrdc", "demdex", "everesttech", "adsrvr", "liadm", "krxd",
+                    "servedby-buysellads", "buysellads", "carbonads", "adzerk",
+                    "lijit", "revcontent", "mgid", "ads.js", "adsbygoogle", "prebid.js",
+                    "/track/", "/banners/", "/adserver/", "fbevents.js", "/adframe.js",
+                    "/popunder", "ad_id=", "adclient=", "clickid=", "fbclid=", "gclid=",
+                    "ad_slot=", "ad_type="
+                ];
+
+                function isAdOrTracker(url) {{
+                    if (!url) return false;
+                    const lowerUrl = url.toString().toLowerCase();
+                    for (const pattern of adPatterns) {{
+                        if (lowerUrl.includes(pattern)) {{
+                            return true;
+                        }}
+                    }}
+                    return false;
+                }}
+
+                // --- 1. Fetch & XHR Interceptor Setup ---
+                const setupInterceptors = () => {{
+                    if (window.__interceptorsSet) return;
+                    window.__interceptorsSet = true;
+
+                    // Fetch Interceptor
+                    const originalFetch = window.fetch;
+                    window.fetch = async function(resource, init) {{
+                        let url = "";
+                        if (typeof resource === 'string') {{
+                            url = resource;
+                        }} else if (resource instanceof Request) {{
+                            url = resource.url;
+                        }} else if (resource && typeof resource.toString === 'function') {{
+                            url = resource.toString();
+                        }}
+                        
+                        if (window.__privacyShieldOn && isAdOrTracker(url)) {{
+                            console.log("Blocked fetch ad/tracker request (DOM level):", url);
+                            return new Response("", {{ status: 404, statusText: "Blocked by Privacy Shield" }});
+                        }}
+                        return originalFetch.apply(this, arguments);
+                    }};
+
+                    // XHR Interceptor (Synchronous patch in open)
+                    const originalOpen = XMLHttpRequest.prototype.open;
+                    XMLHttpRequest.prototype.open = function(method, url) {{
+                        this.__requestUrl = url;
+                        if (window.__privacyShieldOn && isAdOrTracker(url)) {{
+                            console.log("Blocked XHR open ad/tracker request (DOM level):", url);
+                            this.__blockedByPrivacyShield = true;
+                        }}
+                        return originalOpen.apply(this, arguments);
+                    }};
+
+                    const originalSend = XMLHttpRequest.prototype.send;
+                    XMLHttpRequest.prototype.send = function() {{
+                        if (this.__blockedByPrivacyShield) {{
+                            console.log("Blocking XHR send ad/tracker request:", this.__requestUrl);
+                            this.dispatchEvent(new Event('error'));
+                            return;
+                        }}
+                        return originalSend.apply(this, arguments);
+                    }};
+
+                    // window.open / Popup Interceptor
+                    const originalWindowOpen = window.open;
+                    window.open = function(url, name, specs) {{
+                        if (window.__privacyShieldOn) {{
+                            if (isAdOrTracker(url)) {{
+                                console.log("Blocked ad/tracker popup:", url);
+                                return null;
+                            }}
+                            
+                            try {{
+                                const currentHost = window.location.hostname.toLowerCase();
+                                const newHost = new URL(url, window.location.href).hostname.toLowerCase();
+                                if (currentHost !== newHost) {{
+                                    console.log("Blocked cross-domain popup redirect:", url);
+                                    return null;
+                                }}
+                            }} catch (e) {{}}
+                        }}
+                        return originalWindowOpen.apply(this, arguments);
+                    }};
+                }};
+
+                // --- 2. Cosmetic Hiding Styles Setup ---
+                const universalCss = '.ad-banner, .adsbygoogle, #ad-container, .taboola, .outbrain, [id^="google_ads_iframe"], [class*="-ad-"], [id*="-ad-"], .ad-slot, .ad-zone, .ad-box, .advertisement';
+
+                const applyAllCosmeticHiding = () => {{
+                    if (!window.__privacyShieldOn) return;
+
+                    // 1. Inject or re-inject initial cosmetic rules style element
+                    if (initialCosmeticCss) {{
+                        let styleId = 'rc-privacy-shield-cosmetic-initial';
+                        let style = document.getElementById(styleId);
+                        if (!style) {{
+                            style = document.createElement('style');
+                            style.id = styleId;
+                            (document.head || document.documentElement).appendChild(style);
+                        }}
+                        if (style.innerHTML !== initialCosmeticCss) {{
+                            style.innerHTML = initialCosmeticCss;
+                        }}
+                    }}
+
+                    // 2. Inject or re-inject universal fallback cosmetic rules style element
+                    let uniStyleId = 'rc-privacy-shield-cosmetic';
+                    let uniStyle = document.getElementById(uniStyleId);
+                    if (!uniStyle) {{
+                        uniStyle = document.createElement('style');
+                        uniStyle.id = uniStyleId;
+                        (document.head || document.documentElement).appendChild(uniStyle);
+                    }}
+                    const uniRules = universalCss + ' {{ display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; width: 0 !important; pointer-events: none !important; }}';
+                    if (uniStyle.innerHTML !== uniRules) {{
+                        uniStyle.innerHTML = uniRules;
+                    }}
+
+                    // 3. Scan DOM and enforce display: none !important directly on matching elements to override inline styles
+                    try {{
+                        const elements = document.querySelectorAll(universalCss);
+                        for (let i = 0; i < elements.length; i++) {{
+                            const el = elements[i];
+                            if (el.style.display !== 'none') {{
+                                el.style.setProperty('display', 'none', 'important');
+                                el.style.setProperty('visibility', 'hidden', 'important');
+                                el.style.setProperty('opacity', '0', 'important');
+                                el.style.setProperty('height', '0', 'important');
+                                el.style.setProperty('width', '0', 'important');
+                                el.style.setProperty('pointer-events', 'none', 'important');
+                            }}
+                        }}
+                    }} catch (e) {{}}
+                }};
+
+                // Dynamic URL-specific cosmetic rules query from engine
+                let dynamicCss = "";
+                const injectDynamicCosmeticRules = async () => {{
+                    if (!window.__privacyShieldOn) return;
+                    try {{
+                        const invokeFn = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
+                        if (!invokeFn) return;
+                        const css = await invokeFn("get_cosmetic_rules", {{ url: window.location.href }});
+                        if (css && css !== dynamicCss) {{
+                            dynamicCss = css;
+                            let styleId = 'rc-privacy-shield-cosmetic-dynamic';
+                            let style = document.getElementById(styleId);
+                            if (!style) {{
+                                style = document.createElement('style');
+                                style.id = styleId;
+                                (document.head || document.documentElement).appendChild(style);
+                            }}
+                            style.innerHTML = css;
+                        }}
+                        
+                        // Force direct style override for dynamic rules selectors as well
+                        if (dynamicCss) {{
+                            const selectorPart = dynamicCss.split(' {{')[0];
+                            if (selectorPart) {{
+                                const elements = document.querySelectorAll(selectorPart);
+                                for (let i = 0; i < elements.length; i++) {{
+                                    const el = elements[i];
+                                    if (el.style.display !== 'none') {{
+                                        el.style.setProperty('display', 'none', 'important');
+                                        el.style.setProperty('visibility', 'hidden', 'important');
+                                    }}
+                                }}
+                            }}
+                        }}
+                    }} catch (e) {{
+                        console.error("Error fetching cosmetic rules:", e);
+                    }}
+                }};
+
+                // --- 3. MutationObserver and DOM Event Hooks ---
+                const startContinuousEnforcement = () => {{
+                    setupInterceptors();
+                    applyAllCosmeticHiding();
+                    injectDynamicCosmeticRules();
+
+                    const observer = new MutationObserver((mutations) => {{
+                        setupInterceptors();
+                        applyAllCosmeticHiding();
+                        for (let i = 0; i < mutations.length; i++) {{
+                            if (mutations[i].addedNodes.length > 0) {{
+                                if (dynamicCss) {{
+                                    const selectorPart = dynamicCss.split(' {{')[0];
+                                    if (selectorPart) {{
+                                        try {{
+                                            const elements = document.querySelectorAll(selectorPart);
+                                            for (let j = 0; j < elements.length; j++) {{
+                                                elements[j].style.setProperty('display', 'none', 'important');
+                                            }}
+                                        }} catch(err) {{}}
+                                    }}
+                                }}
+                                break;
+                            }}
+                        }}
+                    }});
+
+                    observer.observe(document.documentElement, {{
+                        childList: true,
+                        subtree: true,
+                        attributes: true,
+                        attributeFilter: ['style', 'class', 'id']
+                    }});
+                }};
+
+                // Run immediately (synchronous / early launch)
+                setupInterceptors();
+                applyAllCosmeticHiding();
+
+                // Hook to DOMContentLoaded to bind the MutationObserver
+                if (document.readyState === "loading") {{
+                    document.addEventListener("DOMContentLoaded", startContinuousEnforcement);
+                }} else {{
+                    startContinuousEnforcement();
+                }}
+
+                // Support SPA and link navigation
+                const patchHistory = () => {{
+                    const originalPushState = history.pushState;
+                    history.pushState = function() {{
+                        originalPushState.apply(this, arguments);
+                        setTimeout(injectDynamicCosmeticRules, 50);
+                    }};
+                    const originalReplaceState = history.replaceState;
+                    history.replaceState = function() {{
+                        originalReplaceState.apply(this, arguments);
+                        setTimeout(injectDynamicCosmeticRules, 50);
+                    }};
+                    window.addEventListener('popstate', () => setTimeout(injectDynamicCosmeticRules, 50));
+                }};
+                try {{
+                    patchHistory();
+                }} catch (e) {{}}
+
+            }})();
+            "#,
+            privacy_shield_on,
+            serde_json::to_string(&initial_cosmetic_css).unwrap_or_else(|_| "\"\"".to_string())
+        ));
 
         // 🚨 100% RELIABLE DOUBLE-TAP HACK 🚨
         webview_builder = webview_builder.initialization_script(r#"
@@ -183,6 +538,15 @@ async fn open_webview(
                 }
                 return false;
             }
+
+            // PC (Tauri/Rust) Privacy Shield Interception
+            if app_for_nav.state::<PrivacyState>().0.load(std::sync::atomic::Ordering::Relaxed) {
+                if is_ad_or_tracker_rust(url_str) {
+                    println!("Blocked ad/tracker navigation on PC: {}", url_str);
+                    return false;
+                }
+            }
+
             true
         });
 
@@ -484,6 +848,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_shell::init())
         .manage(SystemState(std::sync::Mutex::new(sysinfo::System::new_all())))
+        .manage(PrivacyState(std::sync::atomic::AtomicBool::new(true)))
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -497,7 +862,9 @@ pub fn run() {
             reload_webview,
             navigate_webview,
             resize_browser_webview,
-            trigger_download
+            trigger_download,
+            set_privacy_shield,
+            get_cosmetic_rules
         ])
         .setup(|app| {
             use tauri::Listener;

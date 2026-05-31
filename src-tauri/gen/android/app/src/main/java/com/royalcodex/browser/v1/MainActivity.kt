@@ -31,11 +31,14 @@ class MainActivity : TauriActivity() {
     var nativeWebView: WebView? = null
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+    private var androidBridge: AndroidBridge? = null
+    private val adBlacklist = HashSet<String>()
 
     @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     override fun onWebViewCreate(webView: WebView) {
         super.onWebViewCreate(webView)
         tauriWebView = webView
+        loadAdBlacklist()
 
         if (nativeWebView == null) {
             val rootView = findViewById<FrameLayout>(android.R.id.content)
@@ -109,9 +112,64 @@ class MainActivity : TauriActivity() {
                         super.doUpdateVisitedHistory(view, url, isReload)
                         url?.let { syncUrlToReact(it) }
                     }
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                        super.onPageStarted(view, url, favicon)
+                        injectPrivacyShieldScripts(view)
+                    }
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         url?.let { syncUrlToReact(it) }
+                        injectPrivacyShieldScripts(view)
+                    }
+
+                    override fun shouldInterceptRequest(
+                        view: WebView?,
+                        request: android.webkit.WebResourceRequest?
+                    ): android.webkit.WebResourceResponse? {
+                        if (request != null && request.url != null) {
+                            val urlString = request.url.toString()
+                            if (androidBridge?.isPrivacyShieldEnabled() == true && isAdOrTracker(urlString)) {
+                                return android.webkit.WebResourceResponse(
+                                    "text/plain",
+                                    "UTF-8",
+                                    java.io.ByteArrayInputStream("".toByteArray())
+                                )
+                            }
+                        }
+                        return super.shouldInterceptRequest(view, request)
+                    }
+
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView?,
+                        request: android.webkit.WebResourceRequest?
+                    ): Boolean {
+                        if (request != null && request.url != null) {
+                            val url = request.url
+                            val urlString = url.toString()
+
+                            if (androidBridge?.isPrivacyShieldEnabled() == true) {
+                                // Block direct navigation to ad/tracker domains
+                                if (isAdOrTracker(urlString)) {
+                                    return true
+                                }
+
+                                val isForMainFrame = request.isForMainFrame
+                                val hasGesture = request.hasGesture()
+
+                                if (isForMainFrame && !hasGesture) {
+                                    val currentUrl = view?.url
+                                    if (currentUrl != null && currentUrl.isNotEmpty() && currentUrl != "about:blank") {
+                                        val currentHost = Uri.parse(currentUrl).host?.lowercase() ?: ""
+                                        val newHost = url.host?.lowercase() ?: ""
+                                        if (currentHost.isNotEmpty() && newHost.isNotEmpty() && currentHost != newHost) {
+                                            // Intercept and block sudden redirects without user gesture
+                                            return true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        return super.shouldOverrideUrlLoading(view, request)
                     }
                 }
 
@@ -205,8 +263,86 @@ class MainActivity : TauriActivity() {
         }
 
         val bridge = AndroidBridge(nativeWebView, tauriWebView, this)
+        androidBridge = bridge
         webView.addJavascriptInterface(bridge, "NativeBridge")
         webView.addJavascriptInterface(bridge, "AndroidBridge")
+    }
+
+    private val adPatterns = arrayOf(
+        "doubleclick", "googlesyndication", "googletagmanager", "googletagservices",
+        "google-analytics", "adservice.google", "quantserve", "quantcast",
+        "scorecardresearch", "criteo", "taboola", "outbrain", "amazon-adsystem",
+        "popads", "popcash", "adnxs", "adcolony", "unityads", "applovin",
+        "ironsrc", "hotjar", "optimizely", "crazyegg", "mixpanel", "bugsnag",
+        "sentry.io", "flurry", "chartbeat", "newrelic", "casalemedia",
+        "rubiconproject", "pubmatic", "openx", "sovrn", "triplelift",
+        "smartadserver", "bidswitch", "bluekai", "liveramp", "lotame",
+        "teads.tv", "thetradedesk", "appnexus", "adroll", "moatads",
+        "integralads", "doubleverify", "appsflyer", "adjust", "onesignal",
+        "clarity.ms", "yandexmetrika", "yandex.ru", "clickcease", "adform",
+        "adsystem", "adtarget", "yieldmo", "indexww", "adobedtm",
+        "omtrdc", "demdex", "everesttech", "adsrvr", "liadm", "krxd",
+        "servedby-buysellads", "buysellads", "carbonads", "adzerk",
+        "lijit", "revcontent", "mgid", "ads.js", "adsbygoogle", "prebid.js",
+        "/track/", "/banners/", "/adserver/", "fbevents.js", "/adframe.js",
+        "/popunder", "ad_id=", "adclient=", "clickid=", "fbclid=", "gclid=",
+        "ad_slot=", "ad_type="
+    )
+
+    fun isAdOrTracker(url: String): Boolean {
+        // First check wildcard patterns (highly effective & fast)
+        val lowerUrl = url.lowercase()
+        for (pattern in adPatterns) {
+            if (lowerUrl.contains(pattern)) {
+                return true
+            }
+        }
+
+        // Secondly segment walk backwards O(N) against the massive StevenBlack blacklist!
+        val parsedUri = try {
+            Uri.parse(url)
+        } catch (e: Exception) {
+            return false
+        }
+        val host = parsedUri.host?.lowercase() ?: ""
+        if (host.isEmpty()) return false
+        
+        var currentDomain = host
+        while (currentDomain.contains(".")) {
+            synchronized(adBlacklist) {
+                if (adBlacklist.contains(currentDomain)) {
+                    return true
+                }
+            }
+            val nextDot = currentDomain.indexOf('.')
+            if (nextDot == -1 || nextDot == currentDomain.length - 1) {
+                break
+            }
+            currentDomain = currentDomain.substring(nextDot + 1)
+        }
+        synchronized(adBlacklist) {
+            if (adBlacklist.contains(currentDomain)) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private fun loadAdBlacklist() {
+        Thread {
+            try {
+                val inputStream = assets.open("ad_domains.txt")
+                val reader = inputStream.bufferedReader()
+                val domains = reader.readLines()
+                synchronized(adBlacklist) {
+                    adBlacklist.addAll(domains.map { it.trim().lowercase() })
+                }
+                inputStream.close()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
     }
 
     private fun syncUrlToReact(url: String) {
@@ -218,6 +354,175 @@ class MainActivity : TauriActivity() {
             )
         }
     }
+
+    private fun injectPrivacyShieldScripts(view: WebView?) {
+        if (view == null || androidBridge?.isPrivacyShieldEnabled() != true) return
+
+        val js = """
+            (function() {
+                const adPatterns = [
+                    "doubleclick", "googlesyndication", "googletagmanager", "googletagservices",
+                    "google-analytics", "adservice.google", "quantserve", "quantcast",
+                    "scorecardresearch", "criteo", "taboola", "outbrain", "amazon-adsystem",
+                    "popads", "popcash", "adnxs", "adcolony", "unityads", "applovin",
+                    "ironsrc", "hotjar", "optimizely", "crazyegg", "mixpanel", "bugsnag",
+                    "sentry.io", "flurry", "chartbeat", "newrelic", "casalemedia",
+                    "rubiconproject", "pubmatic", "openx", "sovrn", "triplelift",
+                    "smartadserver", "bidswitch", "bluekai", "liveramp", "lotame",
+                    "teads.tv", "thetradedesk", "appnexus", "adroll", "moatads",
+                    "integralads", "doubleverify", "appsflyer", "adjust", "onesignal",
+                    "clarity.ms", "yandexmetrika", "yandex.ru", "clickcease", "adform",
+                    "adsystem", "adtarget", "yieldmo", "indexww", "adobedtm",
+                    "omtrdc", "demdex", "everesttech", "adsrvr", "liadm", "krxd",
+                    "servedby-buysellads", "buysellads", "carbonads", "adzerk",
+                    "lijit", "revcontent", "mgid", "ads.js", "adsbygoogle", "prebid.js",
+                    "/track/", "/banners/", "/adserver/", "fbevents.js", "/adframe.js",
+                    "/popunder", "ad_id=", "adclient=", "clickid=", "fbclid=", "gclid=",
+                    "ad_slot=", "ad_type="
+                ];
+
+                function isAdOrTracker(url) {
+                    if (!url) return false;
+                    const lowerUrl = url.toString().toLowerCase();
+                    for (const pattern of adPatterns) {
+                        if (lowerUrl.includes(pattern)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+
+                // --- 1. Interceptors Setup ---
+                function setupInterceptors() {
+                    if (window.__rcSubresourceHooked) return;
+                    window.__rcSubresourceHooked = true;
+                    window.__privacyShieldOn = true;
+
+                    // Patch fetch
+                    const originalFetch = window.fetch;
+                    window.fetch = async function(resource, init) {
+                        let url = "";
+                        if (typeof resource === 'string') {
+                            url = resource;
+                        } else if (resource instanceof Request) {
+                            url = resource.url;
+                        } else if (resource && typeof resource.toString === 'function') {
+                            url = resource.toString();
+                        }
+                        
+                        if (window.__privacyShieldOn && isAdOrTracker(url)) {
+                            console.log("Blocked fetch ad/tracker request (DOM level):", url);
+                            return new Response("", { status: 404, statusText: "Blocked by Privacy Shield" });
+                        }
+                        return originalFetch.apply(this, arguments);
+                    };
+
+                    // Patch XHR open
+                    const originalOpen = XMLHttpRequest.prototype.open;
+                    XMLHttpRequest.prototype.open = function(method, url) {
+                        this.__requestUrl = url;
+                        if (window.__privacyShieldOn && isAdOrTracker(url)) {
+                            console.log("Blocked XHR open ad/tracker request (DOM level):", url);
+                            this.__blockedByPrivacyShield = true;
+                        }
+                        return originalOpen.apply(this, arguments);
+                    };
+
+                    const originalSend = XMLHttpRequest.prototype.send;
+                    XMLHttpRequest.prototype.send = function() {
+                        if (this.__blockedByPrivacyShield) {
+                            console.log("Blocking XHR send ad/tracker request:", this.__requestUrl);
+                            this.dispatchEvent(new Event('error'));
+                            return;
+                        }
+                        return originalSend.apply(this, arguments);
+                    };
+                }
+
+                // --- 2. Cosmetic Element Hiding & Direct Styling Overrides ---
+                const cssSelectors = '.ad-banner, .adsbygoogle, #ad-container, .taboola, .outbrain, [id^="google_ads_iframe"], [class*="-ad-"], [id*="-ad-"], .ad-slot, .ad-zone, .ad-box, .advertisement, .ad-container, .ads-container, .ad-wrapper, .ad-wrap, .ad-unit, .ads-wrapper, [class*="AdClass"], [class*="AdUnit"], [class*="AdWrapper"], [class*="advertisement"], [class*="AdContent"], [id*="AdContent"], [id*="AdContainer"], [id*="google_ads"], [id*="div-gpt-ad"], amp-ad, ins.adsbygoogle, .ad-holder, .ad-label, .ad-text, .banner-ad, .banner_ad, #ad-banner, #ad-slot, #banner-ad';
+
+                function enforceCosmeticHiding() {
+                    if (!window.__privacyShieldOn) return;
+                    
+                    // Ensure stylesheet exists in document
+                    var styleId = 'rc-privacy-shield-cosmetic';
+                    var style = document.getElementById(styleId);
+                    if (!style) {
+                        style = document.createElement('style');
+                        style.id = styleId;
+                        (document.head || document.documentElement).appendChild(style);
+                    }
+                    const expectedCss = cssSelectors + ' { display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; width: 0 !important; pointer-events: none !important; }';
+                    if (style.innerHTML !== expectedCss) {
+                        style.innerHTML = expectedCss;
+                    }
+
+                    // Direct style override to guarantee hidden state and bypass inline style manipulation
+                    try {
+                        const elements = document.querySelectorAll(cssSelectors);
+                        for (let i = 0; i < elements.length; i++) {
+                            const el = elements[i];
+                            if (el.style.display !== 'none') {
+                                el.style.setProperty('display', 'none', 'important');
+                                el.style.setProperty('visibility', 'hidden', 'important');
+                                el.style.setProperty('opacity', '0', 'important');
+                                el.style.setProperty('height', '0', 'important');
+                                el.style.setProperty('width', '0', 'important');
+                                el.style.setProperty('pointer-events', 'none', 'important');
+                            }
+                        }
+                    } catch (e) {}
+                }
+
+                // --- 3. MutationObserver Setup ---
+                let observer = null;
+                function startContinuousEnforcement() {
+                    setupInterceptors();
+                    enforceCosmeticHiding();
+
+                    if (observer) return;
+                    
+                    if (document.documentElement) {
+                        observer = new MutationObserver(function(mutations) {
+                            enforceCosmeticHiding();
+                        });
+                        observer.observe(document.documentElement, {
+                            childList: true,
+                            subtree: true,
+                            attributes: true,
+                            attributeFilter: ['style', 'class', 'id']
+                        });
+                    }
+                }
+
+                // Run immediately (synchronous / early launch)
+                setupInterceptors();
+                enforceCosmeticHiding();
+
+                // Binds on DOMContentLoaded
+                if (document.readyState === "loading") {
+                    document.addEventListener("DOMContentLoaded", startContinuousEnforcement);
+                } else {
+                    startContinuousEnforcement();
+                }
+
+                // Continuous verification loop (failsafe check every 100ms for first 5 seconds to defend against fast re-writes)
+                let checkCount = 0;
+                const intervalId = setInterval(function() {
+                    setupInterceptors();
+                    enforceCosmeticHiding();
+                    startContinuousEnforcement();
+                    checkCount++;
+                    if (checkCount > 50) {
+                        clearInterval(intervalId);
+                    }
+                }, 100);
+
+            })();
+        """.trimIndent()
+        view.evaluateJavascript(js, null)
+    }
 }
 
 class AndroidBridge(
@@ -225,6 +530,18 @@ class AndroidBridge(
     private val tauriWebView: WebView?,
     private val context: Context
 ) {
+    private var privacyShieldEnabled: Boolean = true
+
+    @JavascriptInterface
+    fun setPrivacyShield(enabled: Boolean) {
+        Handler(Looper.getMainLooper()).post {
+            privacyShieldEnabled = enabled
+        }
+    }
+
+    fun isPrivacyShieldEnabled(): Boolean {
+        return privacyShieldEnabled
+    }
     
     @JavascriptInterface
     fun hideContextMenu() {
@@ -342,5 +659,10 @@ class AndroidBridge(
         Handler(Looper.getMainLooper()).post {
             nativeWebView?.reload()
         }
+    }
+
+    @JavascriptInterface
+    fun reloadWebview() {
+        reload()
     }
 }

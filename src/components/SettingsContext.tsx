@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
 
 type Theme = 'System' | 'Dark' | 'Light';
 type Language = 'English (US)' | 'Sinhala (LK)' | 'Singlish';
@@ -140,6 +141,20 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     localStorage.setItem('app-privacy-shield', String(privacyShield));
+    
+    // Pass to Android native layer if available
+    const win = window as any;
+    if (win.NativeBridge || win.AndroidBridge) {
+      try {
+        (win.NativeBridge || win.AndroidBridge).setPrivacyShield(privacyShield);
+      } catch (err) {
+        console.warn("Failed to set Android privacy shield:", err);
+      }
+    }
+    
+    // Pass to PC (Tauri/Rust) native layer
+    invoke('set_privacy_shield', { enabled: privacyShield })
+      .catch((err) => console.warn("Failed to set PC privacy shield:", err));
   }, [privacyShield]);
 
   // Save autoHideSidebar to localStorage
